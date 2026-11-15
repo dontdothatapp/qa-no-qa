@@ -13,6 +13,10 @@ import { createRunFolder, startDaemon } from '../src/daemon.ts';
 import { clearCurrentRun, isAlive, readCurrentRun, sendCommand, writeCurrentRun } from '../src/daemon-client.ts';
 import { createScriptedClient, createTypeSafeClient, JevError, type JevAnswer, type JevClient } from '../src/jev-client.ts';
 import { loadSuite, SuiteError } from '../src/scenarios.ts';
+import { runDoctor } from '../src/doctor.ts';
+import { login } from '../src/login.ts';
+import { chromium } from 'playwright';
+import { TypeSafeClient, noul } from '@typesafe-ai/sdk';
 
 export const COMMANDS = ['start', 'daemon', 'run', 'resume', 'look', 'act', 'shot', 'step-done', 'giveup', 'evidence', 'report', 'stop', 'doctor', 'login'] as const;
 export type CommandName = (typeof COMMANDS)[number];
@@ -132,9 +136,26 @@ export async function main(argv: string[]): Promise<number> {
       case 'report':
         print(await sendCommand('report', {}));
         return 0;
-      case 'doctor':
-      case 'login':
-        throw new Error('not implemented');
+      case 'doctor': {
+        const r = await runDoctor({
+          env: process.env,
+          nodeVersion: process.version,
+          chromiumPath: () => chromium.executablePath(),
+          fileExists: fs.existsSync,
+          pingJev: async (key) => {
+            const client = new TypeSafeClient({ apiKey: key, logLevel: 'off', retry: { maxRetries: 0 } } as ConstructorParameters<typeof TypeSafeClient>[0]);
+            await client.systemOne({ state: 'ping', questions: { ok: noul('Is this a test message?') } } as Parameters<TypeSafeClient['systemOne']>[0]);
+          },
+        });
+        print(r);
+        return r.ok ? 0 : 1;
+      }
+      case 'login': {
+        const [sessionName, url] = positionals;
+        if (!sessionName || !url) throw new UsageError('usage: qa login <name> <url>');
+        print(await login(sessionName, url));
+        return 0;
+      }
       default:
         print(await sendCommand(name, { id: needId(positionals, `${name} <id>`) }));
         return 0;

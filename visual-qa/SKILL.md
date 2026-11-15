@@ -18,7 +18,8 @@ Runner command prefix used below: `node ${CLAUDE_SKILL_DIR}/bin/qa.ts`
 Run `node ${CLAUDE_SKILL_DIR}/bin/qa.ts doctor`.
 - Any failed check with `"level":"error"` → stop and tell the user the check's `detail` (it says how to fix it).
 - `anthropic_api_key` warning → tell the user that Claude Code may be billing the API instead of their subscription (they can check with `/status`) and ask whether to continue. Wait for the answer.
-- Mention once, in one line, that page text is sent to TypeSafe (Jev's provider) while scenarios run.
+- `chrome_remote_debugging` warning → only matters if the scenario file runs in Chrome (the default, `browser: chrome`): tell the user to switch it on at `chrome://inspect/#remote-debugging`, or use `browser: isolated`.
+- Mention once, in one or two lines: page text is sent to TypeSafe (Jev's provider) while scenarios run — in Chrome mode that includes text from the user's signed-in pages — and Chrome-mode tests act in the user's real accounts.
 
 ## 2. Scenarios
 
@@ -32,7 +33,8 @@ Run `node ${CLAUDE_SKILL_DIR}/bin/qa.ts start <file> --session ${CLAUDE_SESSION_
 - An error naming a missing session → show the user the exact `login` command from the error (they run it in their own terminal, sign in, close the window), then stop.
 - "a run is already active" → ask the user whether to end that run (`node ${CLAUDE_SKILL_DIR}/bin/qa.ts stop`), then start again.
 - Any other error (e.g. invalid scenario file) → show it, fix the YAML with the user, and start again.
-- On success, note `runDir`, the `scenarios` list and `judgeModel`.
+- Chrome mode: before running `start`, tell the user to click **Allow** in Chrome when it asks (the connection waits up to 110 s).
+- On success, note `runDir`, `browser`, the `scenarios` list and `judgeModel`, and pass on any `note`.
 
 ## 4. Run each scenario, in order
 

@@ -182,6 +182,7 @@ export async function main(argv: string[]): Promise<number> {
           nodeVersion: process.version,
           chromiumPath: () => chromium.executablePath(),
           fileExists: fs.existsSync,
+          chromeEndpoint: () => findChromeEndpoint(),
           pingJev: async (key) => {
             const client = new TypeSafeClient({ apiKey: key, logLevel: 'off', retry: { maxRetries: 0 } } as ConstructorParameters<typeof TypeSafeClient>[0]);
             await client.systemOne({ state: 'ping', questions: { ok: noul('Is this a test message?') } } as Parameters<TypeSafeClient['systemOne']>[0]);

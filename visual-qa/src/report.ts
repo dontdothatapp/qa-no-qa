@@ -29,6 +29,7 @@ export type ReportRow = {
 
 export type ReportModel = {
   topic: string;
+  browser: 'chrome' | 'isolated';
   startedAt: string;
   baseUrl: string;
   durationMs: number;
@@ -80,7 +81,7 @@ export function buildReportModel(runDir: string, opts: { configDir?: string } = 
 
   const started = Date.parse(run.startedAt);
   const lastTs = events.reduce((m, e) => Math.max(m, Date.parse(String(e.ts ?? '')) || 0), started);
-  return { topic: run.suite.topic, startedAt: run.startedAt, baseUrl: run.suite.baseUrl, durationMs: Math.max(0, lastTs - started), counts, rows, jev, claude };
+  return { topic: run.suite.topic, browser: run.suite.browser ?? 'isolated', startedAt: run.startedAt, baseUrl: run.suite.baseUrl, durationMs: Math.max(0, lastTs - started), counts, rows, jev, claude };
 }
 
 export function summaryLine(c: Record<Verdict, number>): string {
@@ -179,7 +180,7 @@ footer{max-width:1280px;margin:auto;padding:8px 24px 40px}footer h2{font-size:16
 dialog{border:none;padding:0;background:transparent;max-width:95vw;max-height:95vh}dialog::backdrop{background:rgba(0,0,0,.75)}dialog img{max-width:95vw;max-height:95vh;display:block;cursor:zoom-out}
 @media (max-width:860px){.head{display:none}.row{grid-template-columns:1fr}.meta,details{grid-column:auto}}
 </style></head><body>
-<header><h1>Visual QA — ${esc(m.topic)}</h1><div class="sub">${esc(when)} · ${esc(m.baseUrl)} · total ${dur(m.durationMs)}</div>
+<header><h1>Visual QA — ${esc(m.topic)}</h1><div class="sub">${esc(when)} · ${esc(m.baseUrl)} · total ${dur(m.durationMs)}${m.browser === 'chrome' ? ' · Ran in your Chrome (shared sign-ins and state)' : ''}</div>
 <div class="summary"><span class="chip pass">${m.counts.pass} pass</span><span class="chip fail">${m.counts.fail} fail</span><span class="chip needs_review">${m.counts.needs_review} needs review</span>
 <span class="filters"><button data-f="all" aria-pressed="true">All</button> <button data-f="fail" aria-pressed="false">Fail</button> <button data-f="needs_review" aria-pressed="false">Needs review</button> <button data-f="pass" aria-pressed="false">Pass</button></span></div></header>
 <main><div class="head"><div>#</div><div>Scenario</div><div>Expected</div><div>Verdict</div><div>Screenshot</div></div>

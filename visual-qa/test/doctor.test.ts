@@ -10,6 +10,7 @@ function deps(p: Partial<DoctorDeps> = {}): DoctorDeps {
     chromiumPath: () => '/fake/chromium',
     fileExists: () => true,
     pingJev: async () => {},
+    chromeEndpoint: () => 'ws://127.0.0.1:9222/devtools/browser/x',
     ...p,
   };
 }
@@ -51,4 +52,15 @@ test('old Node and missing Chromium are errors', async () => {
 test('output never contains key values', async () => {
   const r = await runDoctor(deps({ env: { TYPESAFE_API_KEY: 'sk-SENTINEL', ANTHROPIC_API_KEY: 'sk-ant-SENTINEL' } }));
   assert.ok(!JSON.stringify(r).includes('SENTINEL'));
+});
+
+test('Chrome remote debugging off → warning with the fix; on → ok', async () => {
+  const off = await runDoctor(deps({ chromeEndpoint: () => null }));
+  assert.equal(off.ok, true, 'a warning, not an error: isolated suites do not need Chrome');
+  const c = off.checks.find((x) => x.name === 'chrome_remote_debugging');
+  assert.equal(c?.ok, false);
+  assert.equal(c?.level, 'warning');
+  assert.match(c?.detail ?? '', /chrome:\/\/inspect\/#remote-debugging/);
+  const on = await runDoctor(deps());
+  assert.equal(on.checks.find((x) => x.name === 'chrome_remote_debugging')?.detail, 'on');
 });

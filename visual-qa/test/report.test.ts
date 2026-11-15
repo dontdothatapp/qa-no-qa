@@ -30,10 +30,10 @@ function record(status: string, extra: Record<string, unknown> = {}) {
   return { status, currentStep: 2, jevActions: 3, claudeActions: 1, elapsedMs: 4200, handbacks: [], madeUp: {}, gaveUp: null, evidence: null, ...extra };
 }
 
-function syntheticRun(sessionId: string): string {
+function syntheticRun(sessionId: string, browser?: 'chrome' | 'isolated'): string {
   const runDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vqa-report-'));
   const suite = {
-    topic: 'Checkout flow', baseUrl: 'https://a.example/', viewport: { width: 1280, height: 800 }, allowHosts: ['a.example'], judgeModel: 'sonnet',
+    topic: 'Checkout flow', ...(browser ? { browser } : {}), baseUrl: 'https://a.example/', viewport: { width: 1280, height: 800 }, allowHosts: ['a.example'], judgeModel: 'sonnet',
     scenarios: [scenario('P1', 'Passing one'), scenario('F1', 'Failing <script>alert(1)</script>'), scenario('G1', 'Gave up')], sourcePath: '/s.yaml',
   };
   const run = {
@@ -114,4 +114,11 @@ test('titles are HTML-escaped', () => {
   const html = renderReport(buildReportModel(syntheticRun('none'), { configDir: TRANSCRIPTS }), fakeImage);
   assert.ok(!html.includes('<script>alert(1)</script>'));
   assert.ok(html.includes('&lt;script&gt;alert(1)&lt;/script&gt;'));
+});
+
+test('chrome-mode runs say so in the header; isolated runs do not', () => {
+  const chrome = renderReport(buildReportModel(syntheticRun('none', 'chrome'), { configDir: TRANSCRIPTS }), fakeImage);
+  assert.ok(chrome.includes('Ran in your Chrome (shared sign-ins and state)'));
+  const isolated = renderReport(buildReportModel(syntheticRun('none', 'isolated'), { configDir: TRANSCRIPTS }), fakeImage);
+  assert.ok(!isolated.includes('Ran in your Chrome'));
 });

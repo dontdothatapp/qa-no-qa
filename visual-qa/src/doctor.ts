@@ -1,5 +1,6 @@
 import { findTypeSafeKey } from './config.ts';
 import { classifyError } from './jev-client.ts';
+import { CHROME_OFF_MESSAGE } from './chrome.ts';
 
 export type DoctorCheck = { name: string; ok: boolean; level: 'error' | 'warning'; detail: string };
 export type DoctorDeps = {
@@ -8,6 +9,8 @@ export type DoctorDeps = {
   chromiumPath: () => string;
   fileExists: (p: string) => boolean;
   pingJev: (key: string) => Promise<void>;
+  /** The user's Chrome remote-debugging endpoint, or null when it is switched off. */
+  chromeEndpoint: () => string | null;
 };
 
 function nodeOk(version: string): boolean {
@@ -45,6 +48,9 @@ export async function runDoctor(d: DoctorDeps): Promise<{ ok: boolean; checks: D
   } else {
     checks.push({ name: 'jev_reachable', level: 'error', ok: false, detail: 'skipped: no key' });
   }
+
+  const chromeOn = !!d.chromeEndpoint();
+  checks.push({ name: 'chrome_remote_debugging', level: 'warning', ok: chromeOn, detail: chromeOn ? 'on' : CHROME_OFF_MESSAGE });
 
   const apiKeySet = !!d.env.ANTHROPIC_API_KEY;
   checks.push({

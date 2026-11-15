@@ -71,3 +71,10 @@ test('SKILL.md says what to do on runner errors (I12)', () => {
 test('judge brief: text evidence is only the copied words', () => {
   assert.match(read('reference/judge.md'), /only the exact words/i);
 });
+
+test('SKILL.md covers chrome mode: Allow click, signed-in text to TypeSafe, real accounts', () => {
+  const { body } = split(read('SKILL.md'));
+  assert.match(body, /Allow/);
+  assert.match(body, /signed-in pages/);
+  assert.match(body, /real accounts/);
+});

@@ -1,0 +1,5 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Sign in</title></head><body>
+<h1>Sign in</h1>
+<form id="f"><p><label for="u">Username</label> <input id="u"></p><p><label for="p">Password</label> <input id="p" type="password"></p><button>Sign in</button></form>
+<script>document.getElementById('f').addEventListener('submit', (e) => { e.preventDefault(); document.cookie = 'auth=1; path=/'; location.href = 'account.html'; });</script>
+</body></html>

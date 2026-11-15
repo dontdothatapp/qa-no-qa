@@ -12,6 +12,7 @@ import { stateDir } from '../src/config.ts';
 import { createRunFolder, startDaemon } from '../src/daemon.ts';
 import { clearCurrentRun, DaemonUnreachable, isOurDaemon, readCurrentRun, sendCommand, writeCurrentRun } from '../src/daemon-client.ts';
 import { writeReport } from '../src/report.ts';
+import { CHROME_OFF_MESSAGE, findChromeEndpoint } from '../src/chrome.ts';
 import { createScriptedClient, createTypeSafeClient, JevError, type JevAnswer, type JevClient } from '../src/jev-client.ts';
 import { loadSuite, SuiteError } from '../src/scenarios.ts';
 import { runDoctor } from '../src/doctor.ts';
@@ -42,7 +43,11 @@ async function waitFor(file: string, child: { exited: boolean }, ms: number): Pr
         // partially written: try again
       }
     }
-    if (child.exited) throw new Error(`the run daemon exited during start — see ${path.join(path.dirname(file), 'daemon.log')}`);
+    if (child.exited) {
+      const logFile = path.join(path.dirname(file), 'daemon.log');
+      const last = fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf8').trim().split('\n').filter((l) => /Error/.test(l)).pop() : '';
+      throw new Error(`the run daemon could not start${last ? `: ${last.trim()}` : ''} — see ${logFile}`);
+    }
     await new Promise((r) => setTimeout(r, 100));
   }
   throw new Error(`the run daemon did not start within ${Math.round(ms / 1000)} s`);
@@ -63,9 +68,17 @@ async function start(positionals: string[], values: Record<string, unknown>): Pr
     if (e instanceof SuiteError) throw new Error(`invalid scenario file: ${e.problems.join('; ')}`);
     throw e;
   }
-  for (const s of suite.scenarios) {
-    if (s.session && !fs.existsSync(path.join(stateDir(), 'sessions', `${s.session}.json`))) {
-      throw new Error(`session "${s.session}" not found — run: node ${BIN} login ${s.session} <url>`);
+  const chromeMode = suite.browser === 'chrome';
+  let note: string | undefined;
+  if (chromeMode) {
+    if (!findChromeEndpoint()) throw new Error(CHROME_OFF_MESSAGE);
+    if (suite.scenarios.some((s) => s.session)) note = 'session: is ignored in chrome mode — scenarios use your Chrome sign-ins';
+    process.stderr.write('Click "Allow" in Chrome to let the QA run connect.\n');
+  } else {
+    for (const s of suite.scenarios) {
+      if (s.session && !fs.existsSync(path.join(stateDir(), 'sessions', `${s.session}.json`))) {
+        throw new Error(`session "${s.session}" not found — run: node ${BIN} login ${s.session} <url>`);
+      }
     }
   }
   const runDir = createRunFolder(suite, typeof values.session === 'string' ? values.session : null, new Date());
@@ -76,13 +89,14 @@ async function start(positionals: string[], values: Record<string, unknown>): Pr
   child.unref();
   let d;
   try {
-    d = await waitFor(path.join(runDir, 'daemon.json'), state, Number(process.env.VISUAL_QA_DAEMON_START_TIMEOUT_MS ?? 20000));
+    const deadline = Number(process.env.VISUAL_QA_DAEMON_START_TIMEOUT_MS ?? (chromeMode ? 110_000 : 20_000));
+    d = await waitFor(path.join(runDir, 'daemon.json'), state, deadline);
   } catch (e) {
     try { if (child.pid) process.kill(child.pid, 'SIGTERM'); } catch { /* already gone */ }
     throw e;
   }
   writeCurrentRun({ runDir, port: d.port, token: d.token, pid: d.pid });
-  return { runDir, scenarios: suite.scenarios.map((s) => s.id), judgeModel: suite.judgeModel };
+  return { runDir, browser: suite.browser, scenarios: suite.scenarios.map((s) => s.id), judgeModel: suite.judgeModel, ...(note ? { note } : {}) };
 }
 
 async function stop(): Promise<unknown> {

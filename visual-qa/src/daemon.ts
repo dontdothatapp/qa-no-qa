@@ -10,10 +10,11 @@ import { captureEvidence, type Evidence } from './evidence.ts';
 import { openEventLog, type EventLog } from './events.ts';
 import { createTypeSafeClient, type JevClient } from './jev-client.ts';
 import {
-  advanceStep, completeScenario, isAllowedUrl, openScenario, resultOf, runJev,
+  advanceStep, closeScenario, completeScenario, isAllowedUrl, openScenario, openScenarioInContext, resultOf, runJev,
   type GaveUp, type RunnerTimeouts, type ScenarioState,
 } from './scenario-runner.ts';
 import { formatControl, takeSnapshot } from './snapshot.ts';
+import { CHROME_OFF_MESSAGE, connectChrome, findChromeEndpoint } from './chrome.ts';
 import { writeReport } from './report.ts';
 import type { Suite } from './types.ts';
 
@@ -77,7 +78,19 @@ export async function startDaemon(runDir: string, opts: DaemonOptions = {}): Pro
   const jev = opts.jev ?? createTypeSafeClient();
   const budget = opts.takeoverBudget ?? DEFAULTS.takeoverBudget;
   const events: EventLog = openEventLog(path.join(runDir, 'events.jsonl'));
-  const browser: Browser = await chromium.launch();
+  const chromeMode = run.suite.browser === 'chrome';
+  let browser: Browser;
+  if (chromeMode) {
+    // the user's own Chrome (§12): they click Allow once; we only ever touch tabs we open
+    const endpoint = findChromeEndpoint(opts.env ?? process.env);
+    if (!endpoint) throw new Error(CHROME_OFF_MESSAGE);
+    browser = await connectChrome(endpoint);
+  } else {
+    browser = await chromium.launch();
+  }
+  const needBrowser = () => {
+    if (!browser.isConnected()) throw new CommandError('the connection to the browser was lost (was Chrome closed?) — run report to keep what was captured');
+  };
   const states = new Map<string, ScenarioState>();
   const token = crypto.randomUUID();
   const t: RunnerTimeouts = { navTimeoutMs: opts.navTimeoutMs, actionTimeoutMs: opts.actionTimeoutMs, settleMs: opts.settleMs };
@@ -106,7 +119,7 @@ export async function startDaemon(runDir: string, opts: DaemonOptions = {}): Pro
   };
 
   const finishIfDone = async (state: ScenarioState) => {
-    if (state.status === 'completed' || state.status === 'gave_up') await state.context.close().catch(() => {});
+    if (state.status === 'completed' || state.status === 'gave_up') await closeScenario(state);
   };
 
   const sessionFile = (name: string | null) => {
@@ -123,8 +136,11 @@ export async function startDaemon(runDir: string, opts: DaemonOptions = {}): Pro
         if (existing.status === 'completed' || existing.status === 'gave_up') return resultOf(existing);
         throw new CommandError(`scenario ${s.id} is already started — use: resume ${s.id}`);
       }
+      needBrowser();
       events.append({ type: 'scenario_start', id: s.id });
-      const state = await openScenario(browser, run.suite, s, sessionFile(s.session), run.madeUpCache, t);
+      const state = chromeMode
+        ? await openScenarioInContext(browser.contexts()[0], run.suite, s, run.madeUpCache, t)
+        : await openScenario(browser, run.suite, s, sessionFile(s.session), run.madeUpCache, t);
       states.set(s.id, state);
       const result = await runJev(state, { jev, events, runDir, ...t });
       persist(state);
@@ -133,6 +149,7 @@ export async function startDaemon(runDir: string, opts: DaemonOptions = {}): Pro
     },
 
     async resume(a) {
+      needBrowser();
       const state = openState(a.id);
       const result = await runJev(state, { jev, events, runDir, ...t });
       persist(state);
@@ -141,6 +158,7 @@ export async function startDaemon(runDir: string, opts: DaemonOptions = {}): Pro
     },
 
     async look(a) {
+      needBrowser();
       const state = openState(a.id);
       const snap = await takeSnapshot(state.page, { frames: true, maxTextChars: DEFAULTS.lookTextChars });
       state.lastSnapshot = snap;
@@ -160,6 +178,7 @@ export async function startDaemon(runDir: string, opts: DaemonOptions = {}): Pro
     },
 
     async act(a) {
+      needBrowser();
       const state = openState(a.id);
       if (state.claudeActions >= budget) throw new CommandError('takeover budget exceeded — give up');
       const op = String(a.op) as ActionOp;
@@ -193,6 +212,7 @@ export async function startDaemon(runDir: string, opts: DaemonOptions = {}): Pro
     },
 
     async shot(a) {
+      needBrowser();
       const state = openState(a.id);
       const n = (lookShots.get(state.scenario.id) ?? 0) + 1;
       lookShots.set(state.scenario.id, n);
@@ -313,6 +333,8 @@ export async function startDaemon(runDir: string, opts: DaemonOptions = {}): Pro
     if (closed) return;
     closed = true;
     if (idleTimer) clearTimeout(idleTimer);
+    // chrome mode: close only our own tabs, then disconnect (never closes the user's Chrome)
+    for (const st of states.values()) await closeScenario(st);
     await browser.close().catch(() => {});
     for (const s of sockets) s.destroy();
     await new Promise<void>((r) => server.close(() => r()));

@@ -1,0 +1,194 @@
+[
+  {
+    "name": "search-type",
+    "ms": 294,
+    "bytes": 937,
+    "usage": {
+      "input_tokens": 599,
+      "output_tokens": 102
+    },
+    "model": "jev-1.14.0",
+    "op": "type",
+    "opConf": 1,
+    "target": 1,
+    "targetConf": 1,
+    "ok": true,
+    "controls": 1
+  },
+  {
+    "name": "search-enter",
+    "ms": 134,
+    "bytes": 991,
+    "usage": {
+      "input_tokens": 617,
+      "output_tokens": 103
+    },
+    "model": "jev-1.14.0",
+    "op": "press_enter",
+    "opConf": 0.99,
+    "target": null,
+    "targetConf": 0.06,
+    "ok": false,
+    "controls": 1
+  },
+  {
+    "name": "shop-backpack",
+    "ms": 205,
+    "bytes": 1219,
+    "usage": {
+      "input_tokens": 721,
+      "output_tokens": 109
+    },
+    "model": "jev-1.14.0",
+    "op": "click",
+    "opConf": 1,
+    "target": 1,
+    "targetConf": 1,
+    "ok": true,
+    "controls": 2
+  },
+  {
+    "name": "shop-tshirt",
+    "ms": 172,
+    "bytes": 1213,
+    "usage": {
+      "input_tokens": 720,
+      "output_tokens": 109
+    },
+    "model": "jev-1.14.0",
+    "op": "click",
+    "opConf": 1,
+    "target": 2,
+    "targetConf": 1,
+    "ok": true,
+    "controls": 2
+  },
+  {
+    "name": "form-name",
+    "ms": 178,
+    "bytes": 1267,
+    "usage": {
+      "input_tokens": 742,
+      "output_tokens": 130
+    },
+    "model": "jev-1.14.0",
+    "op": "type",
+    "opConf": 0.98,
+    "target": 1,
+    "targetConf": 1,
+    "ok": true,
+    "controls": 5
+  },
+  {
+    "name": "form-submit",
+    "ms": 159,
+    "bytes": 1264,
+    "usage": {
+      "input_tokens": 742,
+      "output_tokens": 130
+    },
+    "model": "jev-1.14.0",
+    "op": "click",
+    "opConf": 0.98,
+    "target": 5,
+    "targetConf": 1,
+    "ok": true,
+    "controls": 5
+  },
+  {
+    "name": "de-strasse",
+    "ms": 151,
+    "bytes": 1096,
+    "usage": {
+      "input_tokens": 678,
+      "output_tokens": 116
+    },
+    "model": "jev-1.14.0",
+    "op": "type",
+    "opConf": 0.97,
+    "target": 2,
+    "targetConf": 1,
+    "ok": true,
+    "controls": 3
+  },
+  {
+    "name": "iframe-blocked",
+    "ms": 203,
+    "bytes": 858,
+    "usage": {
+      "input_tokens": 566,
+      "output_tokens": 95
+    },
+    "model": "jev-1.14.0",
+    "op": "wait",
+    "opConf": 0.58,
+    "target": null,
+    "targetConf": 1,
+    "ok": false,
+    "controls": 0
+  },
+  {
+    "name": "popup-open",
+    "ms": 163,
+    "bytes": 906,
+    "usage": {
+      "input_tokens": 594,
+      "output_tokens": 102
+    },
+    "model": "jev-1.14.0",
+    "op": "click",
+    "opConf": 0.92,
+    "target": 1,
+    "targetConf": 1,
+    "ok": true,
+    "controls": 1
+  },
+  {
+    "name": "busy-item",
+    "ms": 327,
+    "bytes": 17936,
+    "usage": {
+      "input_tokens": 12387,
+      "output_tokens": 2275
+    },
+    "model": "jev-1.14.0",
+    "op": "click",
+    "opConf": 0.94,
+    "target": 250,
+    "targetConf": 0.99,
+    "ok": true,
+    "controls": 300
+  },
+  {
+    "name": "thanks-done",
+    "ms": 217,
+    "bytes": 887,
+    "usage": {
+      "input_tokens": 569,
+      "output_tokens": 95
+    },
+    "model": "jev-1.14.0",
+    "op": "done",
+    "opConf": 1,
+    "target": null,
+    "targetConf": 1,
+    "ok": true,
+    "controls": 0
+  },
+  {
+    "name": "wikipedia-history",
+    "ms": 210,
+    "bytes": 18983,
+    "usage": {
+      "input_tokens": 10308,
+      "output_tokens": 2274
+    },
+    "model": "jev-1.14.0",
+    "op": "done",
+    "opConf": 0.45,
+    "target": 11,
+    "targetConf": 0.91,
+    "ok": false,
+    "controls": 1099
+  }
+]

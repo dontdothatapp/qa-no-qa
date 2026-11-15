@@ -7,6 +7,8 @@ export type JevRequest = { state: Record<string, unknown>; questions: Record<str
 export type JevAnswer = {
   operation: Operation;
   opConfidence: number;
+  /** Probability per operation, as returned by Jev (used to merge click/type on text fields). */
+  opProbabilities: Record<string, number>;
   target: number | null;
   targetConfidence: number;
   usage: JevUsage;
@@ -48,7 +50,7 @@ function toJevError(e: unknown): JevError {
   return new JevError(`Jev ${kind} error${status}: ${(e as Error)?.message ?? String(e)}`, kind);
 }
 
-type ChoiceAnswer = { choice?: string; confidence?: number };
+type ChoiceAnswer = { choice?: string; confidence?: number; probabilities?: Record<string, number> };
 
 export function createTypeSafeClient(
   opts: { fetch?: typeof fetch; apiKey?: string; retry?: Partial<RetryPolicy>; timeoutMs?: number } = {},
@@ -81,6 +83,7 @@ export function createTypeSafeClient(
       return {
         operation: (op.choice ?? 'blocked') as Operation,
         opConfidence: op.confidence ?? 0,
+        opProbabilities: op.probabilities ?? {},
         target: target.choice && target.choice !== 'none' ? Number(target.choice) : null,
         targetConfidence: target.confidence ?? 0,
         usage: {
@@ -107,6 +110,7 @@ export function createScriptedClient(answers: Array<Partial<JevAnswer> | JevErro
       return {
         operation: 'done',
         opConfidence: 1,
+        opProbabilities: {},
         target: null,
         targetConfidence: 1,
         usage: { inputTokens: 100, outputTokens: 10 },

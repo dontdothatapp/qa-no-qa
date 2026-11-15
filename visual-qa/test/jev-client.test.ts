@@ -66,6 +66,7 @@ test('200 response maps to a JevAnswer with usage', async () => {
   assert.equal(a.opConfidence, 0.93);
   assert.equal(a.targetConfidence, 0.88);
   assert.deepEqual(a.usage, { inputTokens: 428, outputTokens: 73 });
+  assert.deepEqual(a.opProbabilities, { click: 0.95, done: 0.05 });
   assert.ok(a.latencyMs >= 0);
 });
 

@@ -1,0 +1,33 @@
+{
+  "model": "jev-1.14.0",
+  "answers": {
+    "operation": {
+      "type": "choice",
+      "choice": "press_enter",
+      "confidence": 0.99,
+      "probabilities": {
+        "click": 0.01,
+        "type": 0,
+        "select": 0,
+        "press_enter": 0.99,
+        "scroll": 0,
+        "wait": 0,
+        "done": 0,
+        "blocked": 0
+      }
+    },
+    "target": {
+      "type": "choice",
+      "choice": "none",
+      "confidence": 0.06,
+      "probabilities": {
+        "1": 0.47,
+        "none": 0.53
+      }
+    }
+  },
+  "usage": {
+    "input_tokens": 617,
+    "output_tokens": 103
+  }
+}

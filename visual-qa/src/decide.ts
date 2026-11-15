@@ -4,8 +4,8 @@ import { formatControl, type Control, type Snapshot } from './snapshot.ts';
 import type { JevRequest } from './jev-client.ts';
 
 export const OPERATION_CRITERIA = {
-  click: 'click a link, button, checkbox or other control',
-  type: 'type text into a field',
+  click: 'click a link, button, checkbox, radio button or tab (not for filling in a text field)',
+  type: 'fill in a text field with a value',
   select: 'choose an option in a dropdown',
   press_enter: 'press Enter in a field, e.g. to submit a search',
   scroll: 'scroll to reveal more of the page',

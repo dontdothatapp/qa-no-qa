@@ -43,6 +43,10 @@ export type ScenarioState = {
   newTabOpened: boolean;
   openError: string | null;
   crashed: boolean;
+  /** false in chrome mode: the context is the user's own profile and must never be closed. */
+  ownsContext: boolean;
+  /** Tabs this scenario opened (its page and popups from it); the only tabs `switch_tab` and `closeScenario` touch. */
+  ownPages: Page[];
 };
 
 export type RunResult = {
@@ -70,12 +74,46 @@ function watchPage(state: ScenarioState, page: Page): void {
   page.on('crash', () => {
     if (page === state.page) state.crashed = true;
   });
+  page.on('popup', (p) => {
+    // only popups from our own tabs count; tabs the user opens are never ours
+    if (!state.ownPages.includes(p)) state.ownPages.push(p);
+    state.newTabOpened = true;
+    watchPage(state, p);
+  });
   page.on('pageerror', (e) => {
     if (state.consoleErrors.length < 20) state.consoleErrors.push(`Uncaught: ${e.message}`.slice(0, 300));
   });
 }
 
 /** Fresh browser context per scenario (§6.1), loaded only from its saved session. */
+async function initScenario(
+  context: BrowserContext,
+  page: Page,
+  ownsContext: boolean,
+  suite: Suite,
+  s: Scenario,
+  madeUp: Record<string, string>,
+  t: RunnerTimeouts,
+): Promise<ScenarioState> {
+  const state: ScenarioState = {
+    scenario: s, suite, context, page,
+    currentStep: 0, stepActions: 0, scenarioActions: 0, claudeActions: 0, jevActions: 0,
+    startedAt: Date.now(), elapsedMs: 0,
+    hashBeforeLastAction: null, unchangedCount: 0, recentActions: [], stepActionLog: [], lastTypedRef: null, lastSnapshot: null,
+    madeUp, madeUpUsed: {}, handbacks: [], status: 'running', gaveUp: null, evidence: null,
+    lastNavStatus: null, consoleErrors: [], newTabOpened: false, openError: null, crashed: false,
+    ownsContext, ownPages: [page],
+  };
+  watchPage(state, page);
+  try {
+    await page.goto(resolveStartUrl(suite, s), { timeout: t.navTimeoutMs ?? DEFAULTS.navTimeoutMs, waitUntil: 'domcontentloaded' });
+  } catch (e) {
+    state.openError = `could not open ${s.start}: ${((e as Error).message ?? '').split('\n')[0]}`;
+  }
+  return state;
+}
+
+/** Isolated mode: a fresh browser context per scenario (§6.1), loaded only from its saved session. */
 export async function openScenario(
   browser: Browser,
   suite: Suite,
@@ -85,28 +123,29 @@ export async function openScenario(
   t: RunnerTimeouts = {},
 ): Promise<ScenarioState> {
   const context = await browser.newContext({ viewport: suite.viewport, ...(sessionFile ? { storageState: sessionFile } : {}) });
+  return initScenario(context, await context.newPage(), true, suite, s, madeUp, t);
+}
+
+/** Chrome mode (§12): a new tab in the user's own profile, emulated at the suite viewport. */
+export async function openScenarioInContext(
+  context: BrowserContext,
+  suite: Suite,
+  s: Scenario,
+  madeUp: Record<string, string>,
+  t: RunnerTimeouts = {},
+): Promise<ScenarioState> {
   const page = await context.newPage();
-  const state: ScenarioState = {
-    scenario: s, suite, context, page,
-    currentStep: 0, stepActions: 0, scenarioActions: 0, claudeActions: 0, jevActions: 0,
-    startedAt: Date.now(), elapsedMs: 0,
-    hashBeforeLastAction: null, unchangedCount: 0, recentActions: [], stepActionLog: [], lastTypedRef: null, lastSnapshot: null,
-    madeUp, madeUpUsed: {}, handbacks: [], status: 'running', gaveUp: null, evidence: null,
-    lastNavStatus: null, consoleErrors: [], newTabOpened: false, openError: null, crashed: false,
-  };
-  watchPage(state, page);
-  context.on('page', (p) => {
-    if (p !== state.page) {
-      state.newTabOpened = true;
-      watchPage(state, p);
-    }
-  });
-  try {
-    await page.goto(resolveStartUrl(suite, s), { timeout: t.navTimeoutMs ?? DEFAULTS.navTimeoutMs, waitUntil: 'domcontentloaded' });
-  } catch (e) {
-    state.openError = `could not open ${s.start}: ${((e as Error).message ?? '').split('\n')[0]}`;
+  await page.setViewportSize(suite.viewport);
+  return initScenario(context, page, false, suite, s, madeUp, t);
+}
+
+/** Closes what the scenario opened: its context in isolated mode, only its own tabs in chrome mode. */
+export async function closeScenario(state: ScenarioState): Promise<void> {
+  if (state.ownsContext) {
+    await state.context.close().catch(() => {});
+    return;
   }
-  return state;
+  for (const p of state.ownPages) if (!p.isClosed()) await p.close().catch(() => {});
 }
 
 export function resultOf(state: ScenarioState, extra: Partial<RunResult> = {}): RunResult {

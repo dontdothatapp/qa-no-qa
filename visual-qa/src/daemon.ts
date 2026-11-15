@@ -150,7 +150,7 @@ export async function startDaemon(runDir: string, opts: DaemonOptions = {}): Pro
         `URL: ${snap.url}`,
         `Title: ${snap.title}`,
         state.currentStep < steps.length ? `Step ${state.currentStep + 1} of ${steps.length}: "${steps[state.currentStep]}"` : 'All steps done',
-        `Open tabs: ${state.context.pages().length}`,
+        `Open tabs: ${state.ownPages.filter((p) => !p.isClosed()).length}`,
         `Controls (${snap.controls.length}${shown.length < snap.controls.length ? `, first ${shown.length} shown` : ''}):`,
         ...shown.map(formatControl),
         'Page text:',

@@ -64,7 +64,7 @@ export async function performAction(
         await loc!.setInputFiles(a.value!, { timeout });
         break;
       case 'switch_tab': {
-        const pages = state.context.pages();
+        const pages = state.ownPages.filter((p) => !p.isClosed()); // never the user's own tabs
         const i = Number(a.value ?? a.ref);
         if (!Number.isInteger(i) || !pages[i]) return { ok: false, detail: `no tab ${a.value ?? a.ref}; open tabs: ${pages.length}` };
         state.page = pages[i];

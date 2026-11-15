@@ -10,7 +10,7 @@ import { captureEvidence, type Evidence } from './evidence.ts';
 import { openEventLog, type EventLog } from './events.ts';
 import { createTypeSafeClient, type JevClient } from './jev-client.ts';
 import {
-  advanceStep, completeScenario, openScenario, resultOf, runJev,
+  advanceStep, completeScenario, isAllowedUrl, openScenario, resultOf, runJev,
   type GaveUp, type RunnerTimeouts, type ScenarioState,
 } from './scenario-runner.ts';
 import { formatControl, takeSnapshot } from './snapshot.ts';
@@ -64,6 +64,8 @@ export function createRunFolder(suite: Suite, sessionId: string | null, now: Dat
 export type DaemonOptions = RunnerTimeouts & {
   jev?: JevClient;
   takeoverBudget?: number;
+  /** Stop after this long without a command (default 30 min) so an abandoned run frees Chromium. */
+  idleMs?: number;
   onStop?: () => void;
   env?: Record<string, string | undefined>;
 };
@@ -166,6 +168,12 @@ export async function startDaemon(runDir: string, opts: DaemonOptions = {}): Pro
       const ref = a.ref === undefined || a.ref === null ? undefined : Number(a.ref);
       const value = a.value === undefined || a.value === null ? undefined : String(a.value);
       const control = ref === undefined ? null : snap.controls.find((c) => c.ref === ref) ?? null;
+      if (op === 'type' && control?.isPassword) {
+        throw new CommandError('refusing to type into a password field — use a saved session (qa login) or put the value in the scenario values');
+      }
+      if (op === 'goto' && value !== undefined && isAllowedUrl(value, run.suite.allowHosts) !== true) {
+        throw new CommandError(`refusing to open ${value}: host is not in allow_hosts (${run.suite.allowHosts.join(', ')})`);
+      }
       const res = await performAction(state, snap, { op, ref, value }, t);
       state.claudeActions++;
       if (op === 'type' && control) {
@@ -276,22 +284,35 @@ export async function startDaemon(runDir: string, opts: DaemonOptions = {}): Pro
       }
       const handler = msg.name ? commands[msg.name] : undefined;
       if (!handler) return send(400, { ok: false, error: `unknown command "${msg.name}"` });
-      // one command at a time: the browser state is shared
-      queue = queue.then(async () => {
+      touch();
+      const exec = async () => {
         try {
           send(200, { ok: true, result: await handler(msg.args ?? {}) });
         } catch (e) {
           send(200, { ok: false, error: e instanceof CommandError ? e.message : `internal error: ${(e as Error).message}` });
         }
-      });
+      };
+      // stop and report never touch the browser, so they must not wait behind a stuck command
+      if (msg.name === 'stop' || msg.name === 'report') return void exec();
+      // everything else runs one at a time: the browser state is shared
+      queue = queue.then(exec).catch(() => {});
     });
   });
   server.on('connection', (s) => { sockets.add(s); s.on('close', () => sockets.delete(s)); });
+
+  const idleMs = opts.idleMs ?? 30 * 60 * 1000;
+  let idleTimer: NodeJS.Timeout | null = null;
+  function touch(): void {
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => { void close().then(() => opts.onStop?.()); }, idleMs);
+    idleTimer.unref();
+  }
 
   let closed = false;
   async function close(): Promise<void> {
     if (closed) return;
     closed = true;
+    if (idleTimer) clearTimeout(idleTimer);
     await browser.close().catch(() => {});
     for (const s of sockets) s.destroy();
     await new Promise<void>((r) => server.close(() => r()));
@@ -300,6 +321,9 @@ export async function startDaemon(runDir: string, opts: DaemonOptions = {}): Pro
   const port = await new Promise<number>((resolve) => {
     server.listen(0, '127.0.0.1', () => resolve((server.address() as import('node:net').AddressInfo).port));
   });
-  fs.writeFileSync(path.join(runDir, 'daemon.json'), JSON.stringify({ port, token, pid: process.pid }), { mode: 0o600 });
+  const daemonFile = path.join(runDir, 'daemon.json');
+  fs.writeFileSync(`${daemonFile}.tmp`, JSON.stringify({ port, token, pid: process.pid }), { mode: 0o600 });
+  fs.renameSync(`${daemonFile}.tmp`, daemonFile); // atomic: `qa start` never reads half a file
+  touch();
   return { port, token, close };
 }

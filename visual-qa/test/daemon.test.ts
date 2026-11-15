@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
+import { isAlive } from '../src/daemon-client.ts';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { startDaemon, createRunFolder } from '../src/daemon.ts';
@@ -39,6 +40,11 @@ scenarios:
     start: /thanks.html
     steps: [Look]
     expected: Thanks
+  - id: S3
+    title: Form
+    start: /form.html
+    steps: [Fill the form]
+    expected: Thanks
 `);
   return file;
 }
@@ -50,7 +56,7 @@ async function cmd(d: { port: number; token: string }, name: string, args: Recor
   return { status: res.status, body: (await res.json()) as { ok: boolean; result?: any; error?: string } };
 }
 
-async function inProcess(answers: Parameters<typeof createScriptedClient>[0], extra: { takeoverBudget?: number } = {}) {
+async function inProcess(answers: Parameters<typeof createScriptedClient>[0], extra: Partial<Parameters<typeof startDaemon>[1]> = {}) {
   const dir = tmp('daemon');
   const env = { ...process.env, VISUAL_QA_OUTPUT_DIR: dir };
   const runDir = createRunFolder(loadSuite(suiteFile(dir)), 'session-x', new Date(), env);
@@ -93,9 +99,48 @@ test('report command writes report.html and results.json', async () => {
     const r = await cmd(d, 'report');
     assert.equal(r.body.ok, true, r.body.error ?? '');
     assert.equal(r.body.result.reportPath, path.join(runDir, 'report.html'));
-    assert.equal(r.body.result.summary, '1 pass · 1 needs review');
+    assert.equal(r.body.result.summary, '1 pass · 2 needs review');
     assert.ok(fs.existsSync(path.join(runDir, 'results.json')));
     assert.match(fs.readFileSync(path.join(runDir, 'report.html'), 'utf8'), /data:image\/jpeg;base64,/);
+  } finally {
+    await d.close();
+  }
+});
+
+test('stop and report answer while another command is stuck (I1)', async () => {
+  const neverAnswers = { decide: () => new Promise<never>(() => {}) };
+  const { d } = await inProcess([], { jev: neverAnswers });
+  void cmd(d, 'run', { id: 'S1' }).catch(() => {});
+  await new Promise((r) => setTimeout(r, 1500));
+  const t0 = Date.now();
+  const rep = await cmd(d, 'report');
+  assert.equal(rep.body.ok, true);
+  const stop = await cmd(d, 'stop');
+  assert.equal(stop.body.ok, true);
+  assert.ok(Date.now() - t0 < 5000);
+  await d.close();
+});
+
+test('an idle daemon stops itself (I8)', async () => {
+  let stopped = false;
+  const { d } = await inProcess([], { idleMs: 300, onStop: () => { stopped = true; } });
+  await new Promise((r) => setTimeout(r, 1200));
+  assert.equal(stopped, true);
+  await assert.rejects(fetch(`http://127.0.0.1:${d.port}/cmd`, { method: 'POST' }));
+});
+
+test('Claude may not type into password fields or goto other hosts (I10)', async () => {
+  const { d } = await inProcess([{ operation: 'blocked' }, { operation: 'blocked' }]);
+  try {
+    await cmd(d, 'run', { id: 'S3' });
+    const look = await cmd(d, 'look', { id: 'S3' });
+    const ref = Number(/\[(\d+)\] textbox "Password"/.exec(look.body.result.text)?.[1]);
+    const pw = await cmd(d, 'act', { id: 'S3', op: 'type', ref, value: 'x' });
+    assert.equal(pw.body.ok, false);
+    assert.match(pw.body.error ?? '', /password field/);
+    const away = await cmd(d, 'act', { id: 'S3', op: 'goto', value: 'https://example.com/' });
+    assert.equal(away.body.ok, false);
+    assert.match(away.body.error ?? '', /not in allow_hosts/);
   } finally {
     await d.close();
   }
@@ -172,7 +217,7 @@ test('CLI end-to-end: start, run, stop (fake Jev)', async () => {
   const started = await qa(['start', suiteFile(dir), '--session', 'sid-1'], env);
   assert.equal(started.code, 0, started.out);
   const s = JSON.parse(started.out);
-  assert.deepEqual(s.scenarios, ['S1', 'S2']);
+  assert.deepEqual(s.scenarios, ['S1', 'S2', 'S3']);
   assert.equal(s.judgeModel, 'sonnet');
   const ran = JSON.parse((await qa(['run', 'S1'], env)).out);
   assert.equal(ran.status, 'completed');
@@ -181,7 +226,7 @@ test('CLI end-to-end: start, run, stop (fake Jev)', async () => {
   assert.ok(!fs.existsSync(path.join(dir, 'state', 'current-run.json')));
 });
 
-test('qa start replaces a stale run but refuses a live one', async () => {
+test('qa start replaces a stale run but refuses a live daemon', async () => {
   const dir = tmp('stale');
   const stateDir = path.join(dir, 'state');
   fs.mkdirSync(stateDir, { recursive: true });
@@ -193,13 +238,57 @@ test('qa start replaces a stale run but refuses a live one', async () => {
   fs.writeFileSync(current, JSON.stringify({ runDir: '/gone', port: 1, token: 't', pid: 999999 }));
   const ok = await qa(['start', suiteFile(dir), '--session', 'x'], env);
   assert.equal(ok.code, 0, ok.out);
-  await qa(['stop'], env);
-
-  fs.writeFileSync(current, JSON.stringify({ runDir: '/live', port: 1, token: 't', pid: process.pid }));
   const refused = await qa(['start', suiteFile(dir), '--session', 'x'], env);
   assert.notEqual(refused.code, 0);
   assert.match(refused.out, /qa stop/);
-  fs.rmSync(current);
+  await qa(['stop'], env);
+});
+
+test('a reused PID is treated as stale and never signalled (I7)', async () => {
+  const dir = tmp('pid');
+  const stateDir = path.join(dir, 'state');
+  fs.mkdirSync(stateDir, { recursive: true });
+  const env = cliEnv(stateDir, path.join(dir, 'out'), path.join(dir, 'none.json'));
+  const bystander = spawn('sleep', ['30']);
+  try {
+    fs.writeFileSync(path.join(stateDir, 'current-run.json'), JSON.stringify({ runDir: '/x', port: 1, token: 't', pid: bystander.pid }));
+    const stopped = await qa(['stop'], env);
+    assert.equal(stopped.code, 0, stopped.out);
+    assert.equal(bystander.exitCode, null);
+    assert.ok(isAlive(bystander.pid!));
+  } finally {
+    bystander.kill();
+  }
+});
+
+test('a daemon that misses the start deadline is killed, not orphaned (I8)', async () => {
+  const dir = tmp('slow');
+  const fake = path.join(dir, 'jev.json');
+  fs.writeFileSync(fake, '[]');
+  const env = { ...cliEnv(path.join(dir, 'state'), path.join(dir, 'out'), fake), VISUAL_QA_DAEMON_START_TIMEOUT_MS: '1' };
+  const r = await qa(['start', suiteFile(dir), '--session', 'x'], env);
+  assert.notEqual(r.code, 0);
+  await new Promise((res) => setTimeout(res, 3000));
+  const ps = await exec('ps', ['-axo', 'command']);
+  assert.ok(!ps.stdout.includes(path.join(dir, 'out')), 'no daemon left for this run');
+});
+
+test('qa report works without a live daemon (I9)', async () => {
+  const dir = tmp('report');
+  const fake = path.join(dir, 'jev.json');
+  fs.writeFileSync(fake, JSON.stringify([{ operation: 'type', target: 1 }, { operation: 'press_enter', target: 1 }, { operation: 'done' }]));
+  const env = cliEnv(path.join(dir, 'state'), path.join(dir, 'out'), fake);
+  const s = JSON.parse((await qa(['start', suiteFile(dir), '--session', 'x'], env)).out);
+  await qa(['run', 'S1'], env);
+  const current = JSON.parse(fs.readFileSync(path.join(dir, 'state', 'current-run.json'), 'utf8'));
+  process.kill(current.pid, 'SIGKILL');
+  await new Promise((res) => setTimeout(res, 500));
+  const r = await qa(['report'], env);
+  assert.equal(r.code, 0, r.out);
+  assert.equal(JSON.parse(r.out).reportPath, path.join(s.runDir, 'report.html'));
+  await qa(['stop'], env);
+  const again = await qa(['report', s.runDir], env);
+  assert.equal(again.code, 0, again.out);
 });
 
 test('qa start reports a missing saved session with the login command', async () => {

@@ -150,15 +150,20 @@ function handback(state: ScenarioState, events: EventLog, reason: HandbackReason
   return resultOf(state, { reason, detail, ...(missing ? { missingFields: missing } : {}) });
 }
 
-function hostAllowed(state: ScenarioState): boolean | 'not_http' {
+/** true / false for http(s) URLs; 'not_http' for anything else (error pages, about:blank). */
+export function isAllowedUrl(url: string, allowHosts: string[]): boolean | 'not_http' {
   try {
-    const u = new URL(state.page.url());
+    const u = new URL(url);
     if (u.protocol !== 'http:' && u.protocol !== 'https:') return 'not_http';
     // entries with a port must match host:port; entries without one match the hostname
-    return state.suite.allowHosts.some((h) => (h.includes(':') ? h === u.host : h === u.hostname));
+    return allowHosts.some((h) => (h.includes(':') ? h === u.host : h === u.hostname));
   } catch {
     return 'not_http';
   }
+}
+
+function hostAllowed(state: ScenarioState): boolean | 'not_http' {
+  return isAllowedUrl(state.page.url(), state.suite.allowHosts);
 }
 
 /** Jev drives the remaining steps until done or a hand-back (§6.2). */

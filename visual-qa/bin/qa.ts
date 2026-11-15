@@ -10,7 +10,8 @@ import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { stateDir } from '../src/config.ts';
 import { createRunFolder, startDaemon } from '../src/daemon.ts';
-import { clearCurrentRun, isAlive, readCurrentRun, sendCommand, writeCurrentRun } from '../src/daemon-client.ts';
+import { clearCurrentRun, DaemonUnreachable, isOurDaemon, readCurrentRun, sendCommand, writeCurrentRun } from '../src/daemon-client.ts';
+import { writeReport } from '../src/report.ts';
 import { createScriptedClient, createTypeSafeClient, JevError, type JevAnswer, type JevClient } from '../src/jev-client.ts';
 import { loadSuite, SuiteError } from '../src/scenarios.ts';
 import { runDoctor } from '../src/doctor.ts';
@@ -34,11 +35,17 @@ function fakeJevFrom(file: string): JevClient {
 async function waitFor(file: string, child: { exited: boolean }, ms: number): Promise<{ port: number; token: string; pid: number }> {
   const until = Date.now() + ms;
   while (Date.now() < until) {
-    if (fs.existsSync(file)) return JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (fs.existsSync(file)) {
+      try {
+        return JSON.parse(fs.readFileSync(file, 'utf8'));
+      } catch {
+        // partially written: try again
+      }
+    }
     if (child.exited) throw new Error(`the run daemon exited during start — see ${path.join(path.dirname(file), 'daemon.log')}`);
     await new Promise((r) => setTimeout(r, 100));
   }
-  throw new Error('the run daemon did not start within 20 s');
+  throw new Error(`the run daemon did not start within ${Math.round(ms / 1000)} s`);
 }
 
 async function start(positionals: string[], values: Record<string, unknown>): Promise<unknown> {
@@ -46,8 +53,8 @@ async function start(positionals: string[], values: Record<string, unknown>): Pr
   if (!file) throw new UsageError('usage: qa start <scenarios.yaml> --session <id>');
   const current = readCurrentRun();
   if (current) {
-    if (isAlive(current.pid)) throw new Error(`a run is already active (pid ${current.pid}, ${current.runDir}) — finish it or run: qa stop`);
-    clearCurrentRun();
+    if (isOurDaemon(current.pid)) throw new Error(`a run is already active (pid ${current.pid}, ${current.runDir}) — finish it or run: qa stop`);
+    clearCurrentRun(); // stale: the daemon is gone (its PID may now belong to another process)
   }
   let suite;
   try {
@@ -67,7 +74,13 @@ async function start(positionals: string[], values: Record<string, unknown>): Pr
   const state = { exited: false };
   child.on('exit', () => { state.exited = true; });
   child.unref();
-  const d = await waitFor(path.join(runDir, 'daemon.json'), state, 20000);
+  let d;
+  try {
+    d = await waitFor(path.join(runDir, 'daemon.json'), state, Number(process.env.VISUAL_QA_DAEMON_START_TIMEOUT_MS ?? 20000));
+  } catch (e) {
+    try { if (child.pid) process.kill(child.pid, 'SIGTERM'); } catch { /* already gone */ }
+    throw e;
+  }
   writeCurrentRun({ runDir, port: d.port, token: d.token, pid: d.pid });
   return { runDir, scenarios: suite.scenarios.map((s) => s.id), judgeModel: suite.judgeModel };
 }
@@ -76,9 +89,9 @@ async function stop(): Promise<unknown> {
   const current = readCurrentRun();
   if (!current) return { stopped: false, note: 'no active run' };
   let result: unknown = { stopped: true, runDir: current.runDir };
-  if (isAlive(current.pid)) {
+  if (isOurDaemon(current.pid)) {
     try {
-      result = await sendCommand('stop', {});
+      result = await sendCommand('stop', {}, process.env, 10_000);
     } catch {
       try { process.kill(current.pid, 'SIGTERM'); } catch { /* already gone */ }
     }
@@ -133,9 +146,22 @@ export async function main(argv: string[]): Promise<number> {
       case 'giveup':
         print(await sendCommand('giveup', { id: needId(positionals, 'giveup <id> --class <c> --reason <text>'), class: values.class, reason: values.reason }));
         return 0;
-      case 'report':
-        print(await sendCommand('report', {}));
+      case 'report': {
+        // works without a live daemon: the report only needs the run folder
+        if (positionals[0]) {
+          print(writeReport(path.resolve(positionals[0])));
+          return 0;
+        }
+        const current = readCurrentRun();
+        if (!current) throw new UsageError('no active run — pass the run folder: qa report <runDir>');
+        try {
+          print(await sendCommand('report', {}));
+        } catch (e) {
+          if (!(e instanceof DaemonUnreachable)) throw e;
+          print(writeReport(current.runDir));
+        }
         return 0;
+      }
       case 'doctor': {
         const r = await runDoctor({
           env: process.env,

@@ -142,7 +142,7 @@ The parts:
 - **Jev API errors (design call):**
   - **Transient errors** (timeout, 429, 5xx): retry twice with backoff, then hand that step back to Claude.
   - **Auth or quota errors mid-run:** pause the run. The skill asks the user whether Claude should drive the remaining scenarios or the run should stop. If it stops, the remaining scenarios are marked needs review with "Jev unavailable".
-- **Password fields** are listed to Jev as `[password field]`, never with their value. The runner types into one only if the scenario explicitly supplies the value, and never logs it. Saved sessions (§6.5) are the preferred way to log in.
+- **Password fields** are listed to Jev as `[password field]`, never with their value, and are **never filled** by Jev, Claude or the runner. Password-like keys in a scenario's `values` are rejected (decided 2026-11-15, after acceptance). Scenarios behind a login use a signed-in session.
 - **Hand back to Claude** (scenario paused, browser kept open) when any of these happens:
   - Jev says `blocked`.
   - Confidence is below the threshold.

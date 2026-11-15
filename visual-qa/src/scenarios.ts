@@ -106,7 +106,9 @@ export function loadSuite(file: string): Suite {
         if (isObject(raw.values)) {
           for (const [k, v] of Object.entries(raw.values)) {
             const s = str(v);
-            if (s === null) problems.push(`${id}: value for "${k}" must be text or a number`);
+            if (/\b(pass(word|code|phrase)?|pwd|pw|pin)\b/i.test(k.replace(/[_-]+/g, ' '))) {
+              problems.push(`${id}: passwords are not supported in values ("${k}") — use a signed-in browser session`);
+            } else if (s === null) problems.push(`${id}: value for "${k}" must be text or a number`);
             else values[k] = s;
           }
         } else {

@@ -67,3 +67,7 @@ test('SKILL.md says what to do on runner errors (I12)', () => {
   assert.match(body, /already active/);
   assert.match(body, /including the current one/);
 });
+
+test('judge brief: text evidence is only the copied words', () => {
+  assert.match(read('reference/judge.md'), /only the exact words/i);
+});

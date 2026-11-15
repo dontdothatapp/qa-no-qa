@@ -19,7 +19,7 @@ scenarios:
     title: Shipping form submits
     start: /form.html
     steps: [Fill the shipping form, 'Click "Submit"']
-    values: {Name: Test User, Email: qa@example.com, Postcode: "10115", Password: fixture-only-pass}
+    values: {Name: Test User, Email: qa@example.com, Postcode: "10115"}
     expected: 'The page says "Thanks! Your form was submitted."'
 
   - id: SHOP-01
@@ -71,7 +71,7 @@ scenarios:
     title: "[broken] Form submit does nothing"
     start: /broken/form.html
     steps: [Fill the shipping form, 'Click "Submit"']
-    values: {Name: Test User, Email: qa@example.com, Postcode: "10115", Password: fixture-only-pass}
+    values: {Name: Test User, Email: qa@example.com, Postcode: "10115"}
     expected: 'The page says "Thanks! Your form was submitted."'
 
   - id: BRK-04

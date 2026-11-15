@@ -79,6 +79,9 @@ export function evaluate(ctx: DecisionContext, d: Defaults = DEFAULTS): { handba
     return { handback: 'low_confidence', detail: `${eff.operation} at confidence ${confidence.toFixed(2)}` };
   }
   if (needsTarget && !target) return { handback: 'low_confidence', detail: `${eff.operation} without a target control` };
+  if (eff.operation === 'type' && target?.isPassword) {
+    return { handback: 'needs_text', detail: `password fields are never filled ("${target.name}") — sign in through a browser session instead` };
+  }
   if ((eff.operation === 'type' || eff.operation === 'select') && !ctx.valueAvailable) {
     return { handback: 'needs_text', detail: `no value for "${target?.name ?? ''}"` };
   }

@@ -25,7 +25,7 @@ Hand-back from the runner (where it stopped and why):
 
 1. Unblock the current step, then `step-done`, then `resume`. If the hand-back reason is `jev_unavailable`, never `resume`: do every remaining step yourself, calling `step-done` after each.
 2. Budget: at most 25 `act` calls for this scenario. When the runner says the budget is exceeded, give up as `tooling_or_environment`.
-3. Never type passwords, one-time codes or payment details. A login wall means the saved session expired: `giveup --class tooling_or_environment --reason "session expired — run qa login"`.
+3. Never type passwords, one-time codes or payment details; leave password fields empty (the runner refuses to fill them). If the site requires one to continue, give up as `tooling_or_environment` with "sign-in needed". A login wall means the saved session expired: `giveup --class tooling_or_environment --reason "session expired — run qa login"`.
 4. Missing values (`needs_text`): fill unspecified fields with obviously fake test data — e.g. `Test User`, `1 Test Street`, `qa+<id>@example.com`, `+1 555 0100` — and add `--made-up` to that `act type` command so the value is recorded. Use the scenario's `values` when it has them. Never invent passwords, payment or real personal data.
 5. If the site rejects a made-up value (format error etc.), give up as `tooling_or_environment` and say which field.
 6. Give-up classes:

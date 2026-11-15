@@ -63,8 +63,14 @@ export function computeVerdict(i: { judge: JudgeOutput | null; pageText: string;
   const bare = points.find((p) => !p.evidence.trim());
   if (bare) return { verdict: 'needs_review', reason: `no evidence given for: ${bare.point}`, quoteProblems: [] };
   const page = normalizeForQuote(i.pageText);
+  // judges sometimes wrap the quote in a description ("Page text lists "X""): accept a quoted part found on the page
+  const quoteFound = (evidence: string) => {
+    if (page.includes(normalizeForQuote(evidence))) return true;
+    const quoted = [...evidence.matchAll(/["\u201C\u201D]([^"\u201C\u201D]{3,})["\u201C\u201D]/g)].map((m) => m[1]);
+    return quoted.length > 0 && quoted.some((q) => page.includes(normalizeForQuote(q)));
+  };
   const quoteProblems = points
-    .filter((p) => p.status === 'met' && p.source === 'text' && p.evidence.trim() && !page.includes(normalizeForQuote(p.evidence)))
+    .filter((p) => p.status === 'met' && p.source === 'text' && p.evidence.trim() && !quoteFound(p.evidence))
     .map((p) => p.evidence);
   if (quoteProblems.length) {
     return { verdict: 'needs_review', reason: `judge quoted text that is not on the page: "${quoteProblems[0]}"`, quoteProblems };

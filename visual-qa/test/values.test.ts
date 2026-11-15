@@ -50,13 +50,13 @@ test('made-up values are used last', () => {
 test('missingFields lists empty text-like fields without a value, in page order', async () => {
   const page = await fx.newPage('form.html');
   const snap = await takeSnapshot(page, { frames: false, maxTextChars: 3000 });
-  assert.deepEqual(missingFields(snap, { Name: 'T' }, {}), ['Email', 'Postcode', 'Password']);
-  assert.deepEqual(missingFields(snap, { Name: 'T', Email: 'e', Postcode: 'p', Password: 'x' }, {}), []);
+  assert.deepEqual(missingFields(snap, { Name: 'T' }, {}), ['Email', 'Postcode'], 'password fields are never "missing": they are never filled');
+  assert.deepEqual(missingFields(snap, { Name: 'T', Email: 'e', Postcode: 'p' }, {}), []);
 });
 
 test('missingFields ignores fields that already have text', async () => {
   const page = await fx.newPage('form.html');
   await page.fill('#email', 'typed@example.com');
   const snap = await takeSnapshot(page, { frames: false, maxTextChars: 3000 });
-  assert.deepEqual(missingFields(snap, { Name: 'T' }, {}), ['Postcode', 'Password']);
+  assert.deepEqual(missingFields(snap, { Name: 'T' }, {}), ['Postcode']);
 });

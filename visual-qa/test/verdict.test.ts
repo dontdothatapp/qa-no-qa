@@ -55,6 +55,16 @@ test('all points met but the judge says fail → needs_review, never pass (C1)',
   assert.match(v.reason, /disagrees/);
 });
 
+test('a met text point whose evidence wraps the exact quote in a description → pass (SRCH-01)', () => {
+  const v = computeVerdict({ judge: judge([met('badge', 'Page text lists "Save 20%"; the screenshot shows it under the price.')]), pageText: PAGE, gaveUp: null });
+  assert.equal(v.verdict, 'pass');
+});
+
+test('a wrapped quote that is not on the page → still needs_review', () => {
+  const v = computeVerdict({ judge: judge([met('badge', 'Page text lists "Save 25%" near the price')]), pageText: PAGE, gaveUp: null });
+  assert.equal(v.verdict, 'needs_review');
+});
+
 test('a met point with no evidence → needs_review', () => {
   assert.equal(computeVerdict({ judge: judge([met('badge', '  ', 'screenshot')]), pageText: PAGE, gaveUp: null }).verdict, 'needs_review');
 });

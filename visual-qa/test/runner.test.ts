@@ -72,7 +72,7 @@ test('needs_text lists every empty field without a value', async () => {
   const { state, runDir } = await start(scenario({ start: '/form.html', steps: ['Fill the form'] }));
   const { result } = await run(state, runDir, [{ operation: 'type', target: 2 }]);
   assert.equal(result.reason, 'needs_text');
-  assert.deepEqual(result.missingFields, ['Name', 'Email', 'Postcode', 'Password']);
+  assert.deepEqual(result.missingFields, ['Name', 'Email', 'Postcode']);
 });
 
 test('a new tab → new_tab', async () => {
@@ -105,14 +105,15 @@ test('Jev auth failure → jev_unavailable', async () => {
   assert.equal(result.reason, 'jev_unavailable');
 });
 
-test('typing a password from values logs the source, never the value', async () => {
+test('password fields are never typed into, even when a value matches', async () => {
   const { state, runDir } = await start(scenario({ start: '/form.html', steps: ['Fill the password'], values: { Password: 'hunter2' } }));
   const ref = await refOf(state, 'Password');
-  const { result } = await run(state, runDir, [{ operation: 'type', target: ref }, { operation: 'done' }]);
-  assert.equal(result.status, 'completed');
-  const log = fs.readFileSync(path.join(runDir, 'events.jsonl'), 'utf8');
-  assert.match(log, /"valueSource":"scenario"/);
-  assert.ok(!log.includes('hunter2'));
+  const { result } = await run(state, runDir, [{ operation: 'type', target: ref }]);
+  assert.equal(result.status, 'handback');
+  assert.equal(result.reason, 'needs_text');
+  assert.match(result.detail ?? '', /password fields are never filled/);
+  assert.equal(await state.page.inputValue('#pw'), '');
+  assert.ok(!fs.readFileSync(path.join(runDir, 'events.jsonl'), 'utf8').includes('hunter2'));
 });
 
 test('jev_decision events carry usage', async () => {

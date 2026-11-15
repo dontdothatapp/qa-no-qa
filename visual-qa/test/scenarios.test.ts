@@ -147,3 +147,15 @@ scenarios:
   assert.ok(problems.includes('judge_model: must be sonnet, haiku, opus or a claude-… model id'), problems.join('\n'));
   assert.ok(problems.includes('A: session name may only contain letters, digits, - and _'), problems.join('\n'));
 });
+
+test('password values are rejected: passwords are not supported', () => {
+  const problems = problemsOf(`
+topic: T
+base_url: https://a.example
+scenarios:
+  - {id: A, title: a, start: /, steps: [x], expected: y, values: {Password: hunter2, PIN code: "1234", Name: ok}}
+`);
+  assert.ok(problems.includes('A: passwords are not supported in values ("Password") — use a signed-in browser session'), problems.join('\n'));
+  assert.ok(problems.includes('A: passwords are not supported in values ("PIN code") — use a signed-in browser session'), problems.join('\n'));
+  assert.equal(problems.length, 2);
+});

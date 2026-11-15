@@ -34,4 +34,4 @@ scenarios:
 - **Values** go in `values` (field label → text). Unspecified fields may be filled with obviously fake test data by Claude, and those values are listed in the report.
 - **Expected results must be observable** on the final page: visible text, elements, layout. Split several checks with `;`.
 - **Quote text that contains `: `** (colon + space), e.g. `expected: 'Cart shows "Cart: 1"'`, or YAML will reject the file.
-- **No secrets.** Never put real passwords in the file; use `session` with `qa login` instead.
+- **No passwords.** Passwords are not supported: keys like `Password`, `PIN` or `Passcode` in `values` are rejected, and password fields are never filled. Scenarios behind a login use a signed-in session instead.

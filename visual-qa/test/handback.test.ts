@@ -44,8 +44,11 @@ test('typing into a "Confirm email" field is not risky (M2)', () =>
   assert.equal(evaluate(ctx({ answer: answer({ operation: 'type', target: 4 }), target: field('Confirm email'), stepText: 'Fill the form' })), null));
 test('type without a value → needs_text', () =>
   assert.equal(evaluate(ctx({ answer: answer({ operation: 'type', target: 4 }), target: field(), valueAvailable: false }))?.handback, 'needs_text'));
-test('password field without a value → needs_text', () =>
-  assert.equal(evaluate(ctx({ answer: answer({ operation: 'type', target: 4 }), target: field('Password', true), valueAvailable: false }))?.handback, 'needs_text'));
+test('typing into a password field always hands back, value or not', () => {
+  const r = evaluate(ctx({ answer: answer({ operation: 'type', target: 4 }), target: field('Password', true), valueAvailable: true }));
+  assert.equal(r?.handback, 'needs_text');
+  assert.match(r?.detail ?? '', /password fields are never filled/);
+});
 test('risky target not asked for → risky_target', () =>
   assert.equal(evaluate(ctx({ target: button('Place order'), stepText: 'Click "Continue"' }))?.handback, 'risky_target'));
 test('risky target the step asks for → proceed', () =>

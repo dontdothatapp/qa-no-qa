@@ -50,10 +50,10 @@ export function findValue(
   return null;
 }
 
-/** Labels of visible, empty, enabled text-like fields that have no value from any source. */
+/** Labels of visible, empty, enabled text-like fields that have no value from any source (password fields are never filled, so never listed). */
 export function missingFields(snap: Snapshot, scenarioValues: Record<string, string>, madeUp: Record<string, string>, stepText = ''): string[] {
   return snap.controls
-    .filter((c) => isTextInput(c) && !c.value && !(c.state ?? '').includes('disabled'))
+    .filter((c) => isTextInput(c) && !c.isPassword && !c.value && !(c.state ?? '').includes('disabled'))
     .filter((c) => findValue(c.name, stepText, scenarioValues, madeUp) === null)
     .map((c) => c.name);
 }

@@ -1,0 +1,36 @@
+# Scenario file format
+
+One YAML file per test topic. The topic names the report folder: `~/QA/<YYYY-MM-DD> <topic>/`.
+
+```yaml
+topic: Checkout flow                    # required
+base_url: https://staging.example.com   # required; scenario `start` paths are resolved against it
+viewport: {width: 1280, height: 800}    # optional (default shown)
+session: staging-user                   # optional: saved login for every scenario (`qa login <name> <url>`)
+allow_hosts: [staging.example.com]      # optional (default: the base_url host); leaving them hands back to Claude
+judge_model: sonnet                     # optional: sonnet | haiku | opus
+scenarios:
+  - id: CO-01                           # letters, digits, - and _ only; unique
+    title: Guest can reach the payment step
+    session: none                       # optional per-scenario override; none = logged out
+    start: /products/backpack           # path or full URL
+    steps:                              # 1 step = 1 small goal; 3–5 steps per scenario is ideal
+      - Click "Add to cart"
+      - Open the cart and click "Checkout"
+      - Fill the shipping form
+      - Click "Continue"
+    values:                             # optional: text to type, by field label
+      Full name: Test User
+      Postcode: "10115"
+    expected: Payment form is visible with card fields; order summary shows 1 item
+```
+
+## Writing good scenarios
+
+- **Self-contained.** Every scenario starts in a fresh browser (only the saved login carries over), so its steps must create whatever the expected result depends on (e.g. add the item before checking the cart).
+- **One goal per step**, phrased as an instruction: `Click "Checkout"`, `Search for "espresso"`, `Select "Annual" in the plan dropdown`.
+- **Quote exact button or link text** with double quotes. A single quoted value in a typing step (`Search for "espresso"`) is typed as-is.
+- **Say when to submit.** Forms are only submitted when a step asks for it.
+- **Values** go in `values` (field label → text). Unspecified fields may be filled with obviously fake test data by Claude, and those values are listed in the report.
+- **Expected results must be observable** on the final page: visible text, elements, layout. Split several checks with `;`.
+- **No secrets.** Never put real passwords in the file; use `session` with `qa login` instead.

@@ -10,14 +10,22 @@ export function isTextInput(c: Control | null | undefined): boolean {
 }
 
 const norm = (s: string) => s.toLowerCase().replace(/[*:]/g, ' ').replace(/\s+/g, ' ').trim();
-const TYPING_VERB = /\b(type|types|typing|enter|search|fill|input|write|set)\b/i;
+const TYPING_VERB = /\b(type|types|typing|enter|search|fill|input|write|set|select|selects|choose|chooses|pick|picks)\b/i;
 
+const words = (s: string) => new Set(s.split(/[^\p{L}\p{N}]+/u).filter(Boolean));
+const subset = (a: Set<string>, b: Set<string>) => a.size > 0 && [...a].every((w) => b.has(w));
+
+/** Exact label match first, then whole-word containment either way ("Name" fits "Your name", not "Username"). */
 function lookup(label: string, values: Record<string, string>): string | null {
   const l = norm(label);
   if (!l) return null;
   const entries = Object.entries(values).map(([k, v]) => [norm(k), v] as const).filter(([k]) => k);
   for (const [k, v] of entries) if (k === l) return v;
-  for (const [k, v] of entries) if (l.includes(k) || k.includes(l)) return v;
+  const lw = words(l);
+  for (const [k, v] of entries) {
+    const kw = words(k);
+    if (subset(kw, lw) || subset(lw, kw)) return v;
+  }
   return null;
 }
 

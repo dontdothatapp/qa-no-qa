@@ -124,3 +124,26 @@ test('missing scenarios list is a problem', () => {
   const problems = problemsOf('topic: T\nbase_url: https://a.example\n');
   assert.ok(problems.includes('scenarios: must be a non-empty list'), problems.join('\n'));
 });
+
+test('allow_hosts always keeps the base_url host (M5)', () => {
+  const suite = loadSuite(writeYaml(`
+topic: T
+base_url: https://staging.example.com
+allow_hosts: [auth.example.com]
+scenarios:
+  - {id: A, title: a, start: /, steps: [x], expected: y}
+`));
+  assert.deepEqual(suite.allowHosts, ['staging.example.com', 'auth.example.com']);
+});
+
+test('judge_model and session names are validated (M8)', () => {
+  const problems = problemsOf(`
+topic: T
+base_url: https://a.example
+judge_model: gpt-9
+scenarios:
+  - {id: A, title: a, start: /, steps: [x], expected: y, session: ../etc}
+`);
+  assert.ok(problems.includes('judge_model: must be sonnet, haiku, opus or a claude-… model id'), problems.join('\n'));
+  assert.ok(problems.includes('A: session name may only contain letters, digits, - and _'), problems.join('\n'));
+});

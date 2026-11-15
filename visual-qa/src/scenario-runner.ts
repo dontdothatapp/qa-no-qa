@@ -150,7 +150,8 @@ function hostAllowed(state: ScenarioState): boolean | 'not_http' {
   try {
     const u = new URL(state.page.url());
     if (u.protocol !== 'http:' && u.protocol !== 'https:') return 'not_http';
-    return state.suite.allowHosts.includes(u.host);
+    // entries with a port must match host:port; entries without one match the hostname
+    return state.suite.allowHosts.some((h) => (h.includes(':') ? h === u.host : h === u.hostname));
   } catch {
     return 'not_http';
   }
@@ -164,6 +165,10 @@ export async function runJev(state: ScenarioState, deps: { jev: JevClient; event
   if (state.openError) return handback(state, events, 'error', state.openError);
 
   while (state.currentStep < s.steps.length) {
+    // the page may have redirected (start page, or after Claude acted) — never let Jev act off-site
+    const where = hostAllowed(state);
+    if (where === 'not_http') return handback(state, events, 'error', `page did not load (${state.page.url()})`);
+    if (!where) return handback(state, events, 'left_allowed_hosts', `page is on ${state.page.url()}`);
     const stepText = s.steps[state.currentStep];
     const snap = await takeSnapshot(state.page, { frames: false, maxTextChars: DEFAULTS.jevTextChars });
     state.lastSnapshot = snap;

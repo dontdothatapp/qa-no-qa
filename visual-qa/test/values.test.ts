@@ -20,6 +20,16 @@ test('single quoted string in a typing step is the value', () => {
   assert.deepEqual(findValue('Name', 'Type "Ada" into Name', {}, {}), { value: 'Ada', source: 'step' });
 });
 
+test('select steps take the quoted option as the value (I4)', () => {
+  assert.deepEqual(findValue('Plan', 'Select "Annual" in the plan dropdown', {}, {}), { value: 'Annual', source: 'step' });
+  assert.deepEqual(findValue('Size', 'Choose "XL"', {}, {}), { value: 'XL', source: 'step' });
+});
+
+test('labels match on whole words only (M4)', () => {
+  assert.equal(findValue('Username', 'Fill the form', { Name: 'Test User' }, {}), null);
+  assert.deepEqual(findValue('Your name', 'Fill the form', { Name: 'Test User' }, {}), { value: 'Test User', source: 'scenario' });
+});
+
 test('a quoted field name is not a value', () => {
   assert.equal(findValue('Straße', 'Fill the "Straße" field', {}, {}), null);
 });

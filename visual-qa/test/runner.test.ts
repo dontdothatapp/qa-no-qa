@@ -17,13 +17,13 @@ function scenario(p: Partial<Scenario>): Scenario {
   return { id: 'S1', title: 't', session: null, start: '/index.html', steps: ['step'], values: {}, expected: 'e', ...p };
 }
 
-function suiteFor(s: Scenario): Suite {
-  return { topic: 'T', baseUrl: fx.baseUrl() + '/', viewport: { width: 1280, height: 800 }, allowHosts: [new URL(fx.baseUrl()).host], judgeModel: 'sonnet', scenarios: [s], sourcePath: '/x.yaml' };
+function suiteFor(s: Scenario, allowHosts?: string[]): Suite {
+  return { topic: 'T', baseUrl: fx.baseUrl() + '/', viewport: { width: 1280, height: 800 }, allowHosts: allowHosts ?? [new URL(fx.baseUrl()).host], judgeModel: 'sonnet', scenarios: [s], sourcePath: '/x.yaml' };
 }
 
-async function start(s: Scenario): Promise<{ state: ScenarioState; runDir: string }> {
+async function start(s: Scenario, allowHosts?: string[]): Promise<{ state: ScenarioState; runDir: string }> {
   const runDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vqa-run-'));
-  const state = await openScenario(fx.browser(), suiteFor(s), s, null, {}, FAST);
+  const state = await openScenario(fx.browser(), suiteFor(s, allowHosts), s, null, {}, FAST);
   return { state, runDir };
 }
 
@@ -121,4 +121,19 @@ test('jev_decision events carry usage', async () => {
   const d = events.read().find((e) => e.type === 'jev_decision');
   assert.deepEqual(d?.usage, { inputTokens: 555, outputTokens: 95 });
   assert.equal(d?.id, 'S1');
+});
+
+test('a start page that redirects off-host hands back before Jev acts (M5)', async () => {
+  const { state, runDir } = await start(scenario({ start: '/redirect-away.html' }));
+  await state.page.waitForURL(/thanks/, { timeout: 5000 });
+  const jev = createScriptedClient([{ operation: 'click', target: 1 }]);
+  const result = await runJev(state, { jev, events: openEventLog(path.join(runDir, 'events.jsonl')), runDir, ...FAST });
+  assert.equal(result.reason, 'left_allowed_hosts');
+  assert.equal(jev.requests.length, 0);
+});
+
+test('allow_hosts entries without a port match the hostname (M5)', async () => {
+  const { state, runDir } = await start(scenario({ start: '/thanks.html' }), ['127.0.0.1']);
+  const { result } = await run(state, runDir, [{ operation: 'done' }]);
+  assert.equal(result.status, 'completed');
 });

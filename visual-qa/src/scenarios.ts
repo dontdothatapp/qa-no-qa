@@ -57,14 +57,21 @@ export function loadSuite(file: string): Suite {
   let allowHosts: string[] = baseUrl ? [baseUrl.host] : [];
   if (doc.allow_hosts !== undefined) {
     if (Array.isArray(doc.allow_hosts) && doc.allow_hosts.every((h) => typeof h === 'string')) {
-      allowHosts = doc.allow_hosts as string[];
+      allowHosts = [...new Set([...allowHosts, ...(doc.allow_hosts as string[])])];
     } else {
       problems.push('allow_hosts: must be a list of host names');
     }
   }
 
+  const SESSION_NAME = /^[A-Za-z0-9_-]+$/;
   const fileSession = str(doc.session);
+  if (fileSession && fileSession.toLowerCase() !== 'none' && !SESSION_NAME.test(fileSession)) {
+    problems.push('session: name may only contain letters, digits, - and _');
+  }
   const judgeModel = str(doc.judge_model) ?? 'sonnet';
+  if (!/^(sonnet|haiku|opus|inherit|claude-[a-z0-9.-]+)$/.test(judgeModel)) {
+    problems.push('judge_model: must be sonnet, haiku, opus or a claude-… model id');
+  }
 
   const scenarios: Scenario[] = [];
   if (!Array.isArray(doc.scenarios) || doc.scenarios.length === 0) {
@@ -109,6 +116,7 @@ export function loadSuite(file: string): Suite {
 
       const ownSession = raw.session === undefined ? fileSession : str(raw.session);
       const session = ownSession && ownSession.toLowerCase() !== 'none' ? ownSession : null;
+      if (raw.session !== undefined && session && !SESSION_NAME.test(session)) problems.push(`${id}: session name may only contain letters, digits, - and _`);
 
       scenarios.push({
         id,

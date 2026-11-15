@@ -35,3 +35,23 @@ test('connectChrome attaches to a running browser', async () => {
     await chrome.close();
   }
 });
+
+test('connecting leaves the user tabs alone (no dark-mode / download overrides) (C1)', async () => {
+  const chrome = await launchStandInChrome();
+  const { chromium } = await import('playwright');
+  const user = await chromium.connectOverCDP(chrome.endpoint, { noDefaults: true });
+  try {
+    const tab = await user.contexts()[0].newPage();
+    await tab.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
+    const before = await tab.evaluate(() => [matchMedia('(prefers-color-scheme: dark)').matches, matchMedia('(prefers-reduced-motion: reduce)').matches]);
+    assert.deepEqual(before, [true, true]);
+    const ours = await connectChrome(chrome.endpoint, 10_000);
+    await new Promise((r) => setTimeout(r, 300));
+    const during = await tab.evaluate(() => [matchMedia('(prefers-color-scheme: dark)').matches, matchMedia('(prefers-reduced-motion: reduce)').matches]);
+    assert.deepEqual(during, [true, true], 'the user tab keeps its own settings while we are connected');
+    await ours.close();
+  } finally {
+    await user.close();
+    await chrome.close();
+  }
+});

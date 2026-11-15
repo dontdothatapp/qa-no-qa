@@ -24,7 +24,12 @@ export function findChromeEndpoint(env: Env = process.env): string | null {
   }
 }
 
-/** Connects to the running Chrome (Chrome asks the user to click Allow). `browser.close()` later only disconnects. */
+/**
+ * Connects to the running Chrome (Chrome asks the user to click Allow). `browser.close()` later only disconnects.
+ * `noDefaults` is essential: without it Playwright applies browser-wide overrides to the user's profile
+ * (download redirection into a temp dir that is deleted on disconnect, forced light colour scheme and
+ * no reduced motion in every open tab).
+ */
 export function connectChrome(endpoint: string, timeoutMs = 100_000): Promise<Browser> {
-  return chromium.connectOverCDP(endpoint, { timeout: timeoutMs });
+  return chromium.connectOverCDP(endpoint, { timeout: timeoutMs, noDefaults: true });
 }

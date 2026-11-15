@@ -1,6 +1,8 @@
 import crypto from 'node:crypto';
 import type { Locator, Page } from 'playwright';
 import { readPage, type RawControl } from './page-reader.ts';
+import { DEFAULTS } from './config.ts';
+import { withTimeout } from './util.ts';
 
 export type Control = RawControl & { frame: number };
 export type Snapshot = { url: string; title: string; controls: Control[]; text: string; hash: string };
@@ -11,7 +13,8 @@ const TEXT_LIKE = new Set(['text', 'email', 'tel', 'number', 'search', 'url', 't
  * Reads the page. With `frames: false` only the main frame is read (what Jev sees);
  * with `frames: true` every frame is read and refs are numbered across frames.
  */
-export async function takeSnapshot(page: Page, opts: { frames: boolean; maxTextChars: number }): Promise<Snapshot> {
+export async function takeSnapshot(page: Page, opts: { frames: boolean; maxTextChars: number; timeoutMs?: number }): Promise<Snapshot> {
+  const timeoutMs = opts.timeoutMs ?? DEFAULTS.actionTimeoutMs;
   const frames = opts.frames ? page.frames() : [page.mainFrame()];
   const controls: Control[] = [];
   let url = page.url();
@@ -19,16 +22,18 @@ export async function takeSnapshot(page: Page, opts: { frames: boolean; maxTextC
   let text = '';
   for (const frame of frames) {
     const frameIndex = page.frames().indexOf(frame);
+    const isMain = frame === page.mainFrame();
     try {
-      const raw = await frame.evaluate(readPage, { startRef: controls.length + 1, maxTextChars: opts.maxTextChars });
+      const raw = await withTimeout(frame.evaluate(readPage, { startRef: controls.length + 1, maxTextChars: opts.maxTextChars }), timeoutMs, 'reading the page');
       if (frame === page.mainFrame()) {
         url = raw.url;
         title = raw.title;
         text = raw.text;
       }
       for (const c of raw.controls) controls.push({ ...c, frame: frameIndex });
-    } catch {
-      // detached or navigating frame: skip it
+    } catch (e) {
+      // a broken child frame is skipped; a main frame we cannot read means the page is unusable
+      if (isMain) throw new Error(`page not responding (${((e as Error).message ?? String(e)).split('\n')[0]})`);
     }
   }
   // Context is only useful to tell identical labels apart; drop it elsewhere to save tokens.

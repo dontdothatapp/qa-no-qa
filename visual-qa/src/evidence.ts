@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DEFAULTS } from './config.ts';
 import type { ScenarioState } from './scenario-runner.ts';
+import { withTimeout } from './util.ts';
 
 export type Evidence = {
   url: string;
@@ -31,12 +32,12 @@ export async function captureEvidence(state: ScenarioState, runDir: string, opts
   const shot = { type: 'jpeg' as const, quality: DEFAULTS.jpegQuality, scale: 'css' as const, animations: 'disabled' as const, timeout: 15000 };
   await page.screenshot({ ...shot, path: viewportShot });
   await page.screenshot({ ...shot, path: fullPageShot, fullPage: true }).catch(() => fs.copyFileSync(viewportShot, fullPageShot));
-  const text = await page.evaluate(() => document.body?.innerText ?? '').catch(() => '');
+  const text = await withTimeout(page.evaluate(() => document.body?.innerText ?? ''), 5000, 'reading page text').catch(() => '');
   const textFile = path.join(scenarioDir, 'page-text.txt');
   fs.writeFileSync(textFile, text.slice(0, DEFAULTS.evidenceTextChars));
   return {
     url: page.url(),
-    title: await page.title().catch(() => ''),
+    title: await withTimeout(page.title(), 5000, 'reading the title').catch(() => ''),
     httpStatus: state.lastNavStatus,
     consoleErrors: [...state.consoleErrors],
     textFile,

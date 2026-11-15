@@ -137,3 +137,39 @@ test('allow_hosts entries without a port match the hostname (M5)', async () => {
   const { result } = await run(state, runDir, [{ operation: 'done' }]);
   assert.equal(result.status, 'completed');
 });
+
+test('a page whose main thread is stuck → error hand-back, not a hang (I1)', async () => {
+  const { state, runDir } = await start(scenario({ start: '/spin.html' }));
+  await new Promise((r) => setTimeout(r, 600));
+  const t0 = Date.now();
+  const { result } = await run(state, runDir, [{ operation: 'done' }]);
+  assert.equal(result.reason, 'error');
+  assert.match(result.detail ?? '', /not responding/);
+  assert.ok(Date.now() - t0 < 15000);
+  await state.context.close();
+});
+
+test('a crashed page → error hand-back, not an exception (I2)', async () => {
+  const { state, runDir } = await start(scenario({ start: '/thanks.html' }));
+  await state.page.goto('chrome://crash').catch(() => {});
+  const { result } = await run(state, runDir, [{ operation: 'done' }]);
+  assert.equal(result.status, 'handback');
+  assert.equal(result.reason, 'error');
+});
+
+test('after a failed start page, Jev can resume once Claude fixed it (I3)', async () => {
+  const { state, runDir } = await start(scenario({ start: '/hang' }));
+  const first = await run(state, runDir, []);
+  assert.equal(first.result.reason, 'error');
+  await state.page.goto(`${fx.baseUrl()}/thanks.html`);
+  const second = await run(state, runDir, [{ operation: 'done' }]);
+  assert.equal(second.result.status, 'completed');
+});
+
+test('after a new_tab hand-back, resume does not loop on the same flag (M1)', async () => {
+  const { state, runDir } = await start(scenario({ start: '/popup.html' }));
+  const first = await run(state, runDir, [{ operation: 'click', target: 1 }]);
+  assert.equal(first.result.reason, 'new_tab');
+  const second = await run(state, runDir, [{ operation: 'done' }]);
+  assert.equal(second.result.status, 'completed');
+});

@@ -42,6 +42,7 @@ export type ScenarioState = {
   consoleErrors: string[];
   newTabOpened: boolean;
   openError: string | null;
+  crashed: boolean;
 };
 
 export type RunResult = {
@@ -66,6 +67,9 @@ function watchPage(state: ScenarioState, page: Page): void {
   page.on('console', (m) => {
     if (m.type() === 'error' && state.consoleErrors.length < 20) state.consoleErrors.push(m.text().slice(0, 300));
   });
+  page.on('crash', () => {
+    if (page === state.page) state.crashed = true;
+  });
   page.on('pageerror', (e) => {
     if (state.consoleErrors.length < 20) state.consoleErrors.push(`Uncaught: ${e.message}`.slice(0, 300));
   });
@@ -88,7 +92,7 @@ export async function openScenario(
     startedAt: Date.now(), elapsedMs: 0,
     hashBeforeLastAction: null, unchangedCount: 0, recentActions: [], stepActionLog: [], lastTypedRef: null, lastSnapshot: null,
     madeUp, madeUpUsed: {}, handbacks: [], status: 'running', gaveUp: null, evidence: null,
-    lastNavStatus: null, consoleErrors: [], newTabOpened: false, openError: null,
+    lastNavStatus: null, consoleErrors: [], newTabOpened: false, openError: null, crashed: false,
   };
   watchPage(state, page);
   context.on('page', (p) => {
@@ -162,15 +166,25 @@ export async function runJev(state: ScenarioState, deps: { jev: JevClient; event
   const { jev, events, runDir } = deps;
   const s = state.scenario;
   state.status = 'running';
-  if (state.openError) return handback(state, events, 'error', state.openError);
+  if (state.openError) {
+    const message = state.openError;
+    state.openError = null; // reported once; Claude may fix the page and resume
+    return handback(state, events, 'error', message);
+  }
 
   while (state.currentStep < s.steps.length) {
     // the page may have redirected (start page, or after Claude acted) — never let Jev act off-site
     const where = hostAllowed(state);
     if (where === 'not_http') return handback(state, events, 'error', `page did not load (${state.page.url()})`);
     if (!where) return handback(state, events, 'left_allowed_hosts', `page is on ${state.page.url()}`);
+    if (state.crashed) return handback(state, events, 'error', 'the page crashed');
     const stepText = s.steps[state.currentStep];
-    const snap = await takeSnapshot(state.page, { frames: false, maxTextChars: DEFAULTS.jevTextChars });
+    let snap: Snapshot;
+    try {
+      snap = await takeSnapshot(state.page, { frames: false, maxTextChars: DEFAULTS.jevTextChars, timeoutMs: deps.actionTimeoutMs });
+    } catch (e) {
+      return handback(state, events, 'error', (e as Error).message);
+    }
     state.lastSnapshot = snap;
     if (state.hashBeforeLastAction !== null) {
       state.unchangedCount = snap.hash === state.hashBeforeLastAction ? state.unchangedCount + 1 : 0;
@@ -234,7 +248,14 @@ export async function runJev(state: ScenarioState, deps: { jev: JevClient; event
     const allowed = hostAllowed(state);
     if (allowed === 'not_http') return handback(state, events, 'error', `navigation failed (${state.page.url()})`);
     if (!allowed) return handback(state, events, 'left_allowed_hosts', `navigated to ${state.page.url()}`);
-    if (state.newTabOpened) return handback(state, events, 'new_tab', 'a new tab or popup opened');
+    if (state.newTabOpened) {
+      state.newTabOpened = false; // reported once; `switch_tab` lets Claude move to it
+      return handback(state, events, 'new_tab', 'a new tab or popup opened');
+    }
   }
-  return completeScenario(state, events, runDir, deps);
+  try {
+    return await completeScenario(state, events, runDir, deps);
+  } catch (e) {
+    return handback(state, events, 'error', `could not capture evidence: ${((e as Error).message ?? '').split('\n')[0]}`);
+  }
 }

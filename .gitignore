@@ -1,0 +1,5 @@
+.visual-qa/
+node_modules/
+visual-qa/test/.tmp/
+.superpowers/
+.DS_Store

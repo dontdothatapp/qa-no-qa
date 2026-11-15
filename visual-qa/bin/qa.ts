@@ -45,8 +45,15 @@ async function waitFor(file: string, child: { exited: boolean }, ms: number): Pr
     }
     if (child.exited) {
       const logFile = path.join(path.dirname(file), 'daemon.log');
-      const last = fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf8').trim().split('\n').filter((l) => /Error/.test(l)).pop() : '';
-      throw new Error(`the run daemon could not start${last ? `: ${last.trim()}` : ''} — see ${logFile}`);
+      // the daemon prints {"error": "..."} as its last line when it cannot start (e.g. Chrome refused)
+      let reason = '';
+      for (const line of (fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf8').trim().split('\n') : []).reverse()) {
+        try {
+          const err = JSON.parse(line).error;
+          if (typeof err === 'string') { reason = err; break; }
+        } catch { /* not JSON */ }
+      }
+      throw new Error(reason || `the run daemon could not start — see ${logFile}`);
     }
     await new Promise((r) => setTimeout(r, 100));
   }

@@ -94,6 +94,7 @@ async function initScenario(
   s: Scenario,
   madeUp: Record<string, string>,
   t: RunnerTimeouts,
+  onCreated?: (state: ScenarioState) => void,
 ): Promise<ScenarioState> {
   const state: ScenarioState = {
     scenario: s, suite, context, page,
@@ -105,6 +106,7 @@ async function initScenario(
     ownsContext, ownPages: [page],
   };
   watchPage(state, page);
+  onCreated?.(state); // register before navigating, so a stop mid-load still closes this tab
   try {
     await page.goto(resolveStartUrl(suite, s), { timeout: t.navTimeoutMs ?? DEFAULTS.navTimeoutMs, waitUntil: 'domcontentloaded' });
   } catch (e) {
@@ -121,9 +123,10 @@ export async function openScenario(
   sessionFile: string | null,
   madeUp: Record<string, string>,
   t: RunnerTimeouts = {},
+  onCreated?: (state: ScenarioState) => void,
 ): Promise<ScenarioState> {
   const context = await browser.newContext({ viewport: suite.viewport, ...(sessionFile ? { storageState: sessionFile } : {}) });
-  return initScenario(context, await context.newPage(), true, suite, s, madeUp, t);
+  return initScenario(context, await context.newPage(), true, suite, s, madeUp, t, onCreated);
 }
 
 /** Chrome mode (§12): a new tab in the user's own profile, emulated at the suite viewport. */
@@ -133,10 +136,11 @@ export async function openScenarioInContext(
   s: Scenario,
   madeUp: Record<string, string>,
   t: RunnerTimeouts = {},
+  onCreated?: (state: ScenarioState) => void,
 ): Promise<ScenarioState> {
   const page = await context.newPage();
   await page.setViewportSize(suite.viewport);
-  return initScenario(context, page, false, suite, s, madeUp, t);
+  return initScenario(context, page, false, suite, s, madeUp, t, onCreated);
 }
 
 /** Closes what the scenario opened: its context in isolated mode, only its own tabs in chrome mode. */

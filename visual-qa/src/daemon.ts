@@ -14,7 +14,7 @@ import {
   type GaveUp, type RunnerTimeouts, type ScenarioState,
 } from './scenario-runner.ts';
 import { formatControl, takeSnapshot } from './snapshot.ts';
-import { CHROME_OFF_MESSAGE, connectChrome, findChromeEndpoint } from './chrome.ts';
+import { CHROME_OFF_MESSAGE, connectChrome, explainConnectError, findChromeEndpoint } from './chrome.ts';
 import { writeReport } from './report.ts';
 import type { Suite } from './types.ts';
 
@@ -82,14 +82,22 @@ export async function startDaemon(runDir: string, opts: DaemonOptions = {}): Pro
   let browser: Browser;
   if (chromeMode) {
     // the user's own Chrome (§12): they click Allow once; we only ever touch tabs we open
-    const endpoint = findChromeEndpoint(opts.env ?? process.env);
+    const env = opts.env ?? process.env;
+    const endpoint = findChromeEndpoint(env);
     if (!endpoint) throw new Error(CHROME_OFF_MESSAGE);
-    browser = await connectChrome(endpoint);
+    const connectTimeout = Number(env.VISUAL_QA_CHROME_CONNECT_TIMEOUT_MS ?? 100_000);
+    try {
+      browser = await connectChrome(endpoint, connectTimeout);
+    } catch (e) {
+      throw new Error(explainConnectError(e, connectTimeout));
+    }
   } else {
     browser = await chromium.launch();
   }
   const needBrowser = () => {
-    if (!browser.isConnected()) throw new CommandError('the connection to the browser was lost (was Chrome closed?) — run report to keep what was captured');
+    if (!browser.isConnected()) {
+      throw new CommandError(`the connection to the browser was lost${chromeMode ? ' (was Chrome closed?)' : ''} — run report to keep what was captured`);
+    }
   };
   const states = new Map<string, ScenarioState>();
   const token = crypto.randomUUID();
@@ -139,8 +147,8 @@ export async function startDaemon(runDir: string, opts: DaemonOptions = {}): Pro
       needBrowser();
       events.append({ type: 'scenario_start', id: s.id });
       const state = chromeMode
-        ? await openScenarioInContext(browser.contexts()[0], run.suite, s, run.madeUpCache, t)
-        : await openScenario(browser, run.suite, s, sessionFile(s.session), run.madeUpCache, t);
+        ? await openScenarioInContext(browser.contexts()[0], run.suite, s, run.madeUpCache, t, (st) => states.set(s.id, st))
+        : await openScenario(browser, run.suite, s, sessionFile(s.session), run.madeUpCache, t, (st) => states.set(s.id, st));
       states.set(s.id, state);
       const result = await runJev(state, { jev, events, runDir, ...t });
       persist(state);
@@ -224,6 +232,7 @@ export async function startDaemon(runDir: string, opts: DaemonOptions = {}): Pro
     },
 
     async 'step-done'(a) {
+      needBrowser();
       const state = openState(a.id);
       events.append({ type: 'step_done', id: state.scenario.id, step: state.currentStep, actor: 'claude' });
       advanceStep(state);

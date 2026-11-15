@@ -367,3 +367,37 @@ These were decided while writing this document, not by the user:
 6. Sonnet for orchestration, takeovers and judging, configurable per scenario file (§6.3, §6.4, §6.8).
 7. Logins via a saved session the user creates by signing in themselves (§6.5).
 8. Scenarios run one at a time in v1 (§3).
+
+## 12. Amendment: run in the user's own Chrome (2026-11-15, after acceptance)
+
+**Decision (user):** scenarios run inside the user's running Chrome, using their existing sign-ins. This is option B. Option A, borrowing cookies into the headless browser, was declined.
+
+**Design calls:**
+- **Browser mode per suite file.**
+  - `browser: chrome` is the **new default** and means the user's running Chrome.
+  - `browser: isolated` is today's separate headless Chromium. It is kept for sites without logins, and for CI.
+- **Connecting.**
+  - Chrome ≥ 144 has an official opt-in: the user switches on remote debugging once, at `chrome://inspect/#remote-debugging`.
+  - At `qa start` the daemon reads Chrome's `DevToolsActivePort` file and connects with Playwright `connectOverCDP`.
+  - Chrome then asks the user to click **Allow**, once per run.
+  - The old `--remote-debugging-port` flag no longer works on the default profile (Chrome 136+).
+- **Tabs, not contexts.**
+  - Each scenario opens a new tab in the user's default profile, so it has their cookies, storage and sign-ins. It runs there and the tab closes after evidence capture.
+  - If the spike shows background tabs can't be screenshotted, scenarios use one dedicated window instead.
+  - The user's other tabs are never read or touched.
+  - Stopping the run only disconnects; it never closes Chrome.
+- **Viewport.** Each tab is emulated at the suite viewport (default 1280×800), so screenshots are consistent whatever the window size.
+- **Shared state.**
+  - Scenarios share the user's sign-ins and site state (carts, settings). This replaces the fresh-browser rule of §6.1 for this mode.
+  - Scenario-format guidance says not to rely on a clean state; any reset goes in the steps.
+  - The report header says "Ran in your Chrome (shared sign-ins and state)".
+- **Popups.** Only popups opened by the scenario's own tab count as `new_tab` (`page.on('popup')`), so the user's own browsing never triggers a hand-back. This applies to both modes.
+- **Sessions.** `session:` and `qa login` are ignored in chrome mode, with a note in `start` output. They are kept for isolated mode.
+- **Preflight.**
+  - In chrome mode, `qa doctor` checks that Chrome ≥ 144 is running with remote debugging on, and says how to enable it.
+  - The skill mentions once that page text from signed-in pages goes to TypeSafe, and that tests act in real accounts (the risky-action guards still apply).
+
+**Build order:**
+1. **Spike against the real Chrome.** Connect, open a tab, set its viewport, screenshot it while it's in the background, close it, and disconnect without closing Chrome.
+2. **Implementation with tests.** Automated tests stand in for "your Chrome" with a Chromium launched with a debug port and a temporary profile. That is the same `connectOverCDP` path, minus the Allow click.
+3. **Re-run the acceptance suite in chrome mode.** ACC-01 then needs the user signed in to the fixture site in their Chrome.

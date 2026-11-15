@@ -20,7 +20,9 @@ You are reviewing the final state of a web page against an expected result. Judg
    - `not_met` — the page clearly contradicts it or it is clearly absent. Say what you see instead.
    - `unclear` — you cannot tell (cut off, too small, ambiguous). Never guess: when in doubt, it is `unclear`.
 3. Text quotes must be copied exactly from the text file; they are checked automatically.
-4. An error page, a login wall or a blank page means the points are `not_met`.
+4. An error page shown by the site itself (e.g. "404", "Something went wrong") means the points are `not_met`.
+5. A login wall means you cannot judge the expected result: mark the points `unclear` and say "login wall shown" in the reason.
+6. A blank page or a browser error page (the page did not load) also means you cannot judge: mark the points `unclear` and say so.
 
 ## Output
 

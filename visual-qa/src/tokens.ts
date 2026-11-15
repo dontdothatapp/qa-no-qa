@@ -93,7 +93,12 @@ export function claudeTokens(
         add(total, model, u);
       }
     };
-    merge(orchestration, sumFile(main, sinceMs));
+    const mainUsage = sumFile(main, sinceMs);
+    // the orchestrating session always produces usage after the run starts; none means we can't read the format
+    if (Object.keys(mainUsage).length === 0) {
+      return { available: false, error: 'no usage entries found after the run started (transcript format may have changed)' };
+    }
+    merge(orchestration, mainUsage);
     const subDir = path.join(path.dirname(main), sessionId, 'subagents');
     const files = fs.existsSync(subDir) ? fs.readdirSync(subDir).filter((f) => /^agent-.*\.jsonl$/.test(f)) : [];
     for (const f of files) {

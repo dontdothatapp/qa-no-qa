@@ -100,6 +100,8 @@ test('missing Claude transcript → "Claude tokens unavailable", still renders',
   const html = renderReport(buildReportModel(syntheticRun('no-such-session'), { configDir: TRANSCRIPTS }), fakeImage);
   assert.ok(html.includes('Claude tokens unavailable'));
   assert.ok(html.includes('Jev'));
+  assert.ok(html.includes('Claude n/a'), 'rows say n/a instead of 0 tok (I5)');
+  assert.ok(!html.includes('Claude 0 tok'));
 });
 
 test('Claude tokens from transcripts appear in the footer', () => {

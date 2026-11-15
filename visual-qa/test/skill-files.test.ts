@@ -47,3 +47,23 @@ test('the judge brief never mentions how the steps were executed', () => {
 test('SKILL.md body stays short', () => {
   assert.ok(split(read('SKILL.md')).body.split('\n').length < 120);
 });
+
+test('judge brief: login walls and blank pages are unclear, not failures (I6)', () => {
+  const j = read('reference/judge.md');
+  assert.match(j, /login wall[^\n]*unclear/i);
+  assert.match(j, /blank page[^\n]*unclear/i);
+});
+
+test('takeover brief covers side effects and the risky/host hand-backs (I10)', () => {
+  const t = read('reference/takeover.md');
+  assert.match(t, /do not submit, buy, delete/i);
+  assert.match(t, /risky_target/);
+  assert.match(t, /left_allowed_hosts/);
+});
+
+test('SKILL.md says what to do on runner errors (I12)', () => {
+  const { body } = split(read('SKILL.md'));
+  assert.match(body, /prints `\{"error"/);
+  assert.match(body, /already active/);
+  assert.match(body, /including the current one/);
+});

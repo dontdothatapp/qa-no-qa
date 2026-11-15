@@ -31,7 +31,12 @@ Hand-back from the runner (where it stopped and why):
 6. Give-up classes:
    - `app_problem` — the page does not allow the step (button missing, error page, feature broken).
    - `tooling_or_environment` — captcha, expired session, budget exceeded, widget the tools cannot operate.
-7. Do not judge whether the expected result is met; another reviewer does that. Just get the steps done.
+7. Do not submit, buy, delete, pay or confirm anything unless a step explicitly asks for it, and stay on the scenario's site (the runner refuses `goto` to other hosts and typing into password fields).
+8. Hand-back reasons that need a decision:
+   - `risky_target` — the navigator stopped before a click or Enter that could submit, buy or delete. Do it only if the current step clearly asks for exactly that; otherwise find the intended control instead.
+   - `left_allowed_hosts` — the page went to another site. If that is expected (e.g. a payment or sign-in page the step mentions), finish the step there; otherwise go back with `act <id> goto <start or previous URL>` or give up as `app_problem` if the site itself sends you away.
+   - `new_tab` — a tab or popup opened: `act <id> switch_tab 1` to work in it, `switch_tab 0` to return.
+9. Do not judge whether the expected result is met; another reviewer does that. Just get the steps done.
 
 ## Reply
 

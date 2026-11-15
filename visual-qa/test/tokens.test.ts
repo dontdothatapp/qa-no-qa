@@ -36,6 +36,12 @@ test('unknown session → unavailable, without throwing', () => {
   assert.ok(!t.available && /not found/.test(t.error));
 });
 
+test('a transcript with no readable usage → unavailable, not zero (I5)', () => {
+  const t = claudeTokens('sess-bad', SINCE, CONFIG);
+  assert.equal(t.available, false);
+  assert.ok(!t.available && /no usage entries/.test(t.error));
+});
+
 test('jevTokens sums jev_decision usage per scenario', () => {
   const j = jevTokens([
     { type: 'jev_decision', id: 'A', usage: { inputTokens: 600, outputTokens: 100 } },

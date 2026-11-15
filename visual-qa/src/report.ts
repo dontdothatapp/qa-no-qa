@@ -117,7 +117,7 @@ function usageTable(rows: Array<[string, Usage4]>): string {
     .join('')}</tbody></table>`;
 }
 
-function rowHtml(r: ReportRow, readImage: (p: string) => Buffer): string {
+function rowHtml(r: ReportRow, readImage: (p: string) => Buffer, claudeAvailable: boolean): string {
   const thumb = img(r.viewportShot, readImage);
   const full = img(r.fullPageShot, readImage);
   const points = r.keyPoints.length
@@ -139,7 +139,7 @@ function rowHtml(r: ReportRow, readImage: (p: string) => Buffer): string {
   <div class="expected">${esc(r.expected)}</div>
   <div class="verdict"><span class="badge ${r.verdict}">${ICON[r.verdict]} ${LABEL[r.verdict]}</span><p>${esc(r.reason)}</p>${points}</div>
   <div class="shot">${thumb ? `<button class="thumb" data-full="${thumb}" aria-label="Enlarge screenshot of ${esc(r.id)}"><img src="${thumb}" alt="Screenshot of ${esc(r.id)}"></button>` : '<div class="noshot">not run</div>'}</div>
-  <div class="meta">${dur(r.elapsedMs)} · Jev ${r.jevActions} action${r.jevActions === 1 ? '' : 's'} · Claude ${r.claudeActions} action${r.claudeActions === 1 ? '' : 's'} · Jev ${tok(r.jevTokens.input + r.jevTokens.output)} tok · Claude ${tok(claudeTotal)} tok</div>
+  <div class="meta">${dur(r.elapsedMs)} · Jev ${r.jevActions} action${r.jevActions === 1 ? '' : 's'} · Claude ${r.claudeActions} action${r.claudeActions === 1 ? '' : 's'} · Jev ${tok(r.jevTokens.input + r.jevTokens.output)} tok · ${claudeAvailable ? `Claude ${tok(claudeTotal)} tok` : 'Claude n/a'}</div>
   <details><summary>Details</summary><div class="details">${quoteIssues}${handbacks}${madeUp}${gates}${full ? `<h4>Full page</h4><img class="full" src="${full}" alt="Full-page screenshot of ${esc(r.id)}">` : ''}</div></details>
 </article>`;
 }
@@ -183,7 +183,7 @@ dialog{border:none;padding:0;background:transparent;max-width:95vw;max-height:95
 <div class="summary"><span class="chip pass">${m.counts.pass} pass</span><span class="chip fail">${m.counts.fail} fail</span><span class="chip needs_review">${m.counts.needs_review} needs review</span>
 <span class="filters"><button data-f="all" aria-pressed="true">All</button> <button data-f="fail" aria-pressed="false">Fail</button> <button data-f="needs_review" aria-pressed="false">Needs review</button> <button data-f="pass" aria-pressed="false">Pass</button></span></div></header>
 <main><div class="head"><div>#</div><div>Scenario</div><div>Expected</div><div>Verdict</div><div>Screenshot</div></div>
-${m.rows.map((r) => rowHtml(r, readImage)).join('\n')}
+${m.rows.map((r) => rowHtml(r, readImage, m.claude.available)).join('\n')}
 </main>
 <footer><h2>Tokens</h2><p><strong>Jev:</strong> ${tok(m.jev.total.input)} in / ${tok(m.jev.total.output)} out</p><p><strong>Claude:</strong></p>${claudeHtml}</footer>
 <dialog id="viewer"><img alt="Enlarged screenshot"></dialog>

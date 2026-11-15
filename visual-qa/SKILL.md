@@ -30,6 +30,7 @@ Input: `$ARGUMENTS`
 
 Run `node ${CLAUDE_SKILL_DIR}/bin/qa.ts start <file> --session ${CLAUDE_SESSION_ID}`.
 - An error naming a missing session → show the user the exact `login` command from the error (they run it in their own terminal, sign in, close the window), then stop.
+- "a run is already active" → ask the user whether to end that run (`node ${CLAUDE_SKILL_DIR}/bin/qa.ts stop`), then start again.
 - Any other error (e.g. invalid scenario file) → show it, fix the YAML with the user, and start again.
 - On success, note `runDir`, the `scenarios` list and `judgeModel`.
 
@@ -38,12 +39,13 @@ Run `node ${CLAUDE_SKILL_DIR}/bin/qa.ts start <file> --session ${CLAUDE_SESSION_
 For each id: `node ${CLAUDE_SKILL_DIR}/bin/qa.ts run <id>`.
 - `"status":"completed"` → next scenario.
 - `"status":"handback"` with `"reason":"jev_unavailable"` → ask the user: should Claude drive the remaining scenarios, or stop?
-  - Stop → for every scenario not yet run: `node ${CLAUDE_SKILL_DIR}/bin/qa.ts giveup <id> --class tooling_or_environment --reason "Jev unavailable"`, then go to step 6.
+  - Stop → for every scenario not finished, including the current one: `node ${CLAUDE_SKILL_DIR}/bin/qa.ts giveup <id> --class tooling_or_environment --reason "Jev unavailable"`, then go to step 6.
   - Claude drives → handle this and every remaining scenario with a takeover agent (below), calling `run` first so the page opens.
 - Any other `"status":"handback"` → start a takeover agent and wait for it before the next scenario:
   - Agent tool, `description: "QA takeover <id>"` (exactly), `model: "sonnet"`.
   - Prompt: the contents of `${CLAUDE_SKILL_DIR}/reference/takeover.md` with `{{QA}}` replaced by `node ${CLAUDE_SKILL_DIR}/bin/qa.ts`, `{{SCENARIO}}` by this scenario's YAML block, and `{{RUN_RESULT}}` by the JSON the runner just printed.
   - The agent replies with one JSON line. Do not open its screenshots yourself.
+- The runner prints `{"error": ...}` for a scenario (instead of a status) → record it with `node ${CLAUDE_SKILL_DIR}/bin/qa.ts giveup <id> --class tooling_or_environment --reason "runner error: <message>"` and continue with the next scenario.
 
 ## 5. Judge
 

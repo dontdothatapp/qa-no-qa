@@ -1,0 +1,233 @@
+import type { Browser, BrowserContext, Page } from 'playwright';
+import { DEFAULTS } from './config.ts';
+import { buildJevRequest } from './decide.ts';
+import { performAction, type ActionOp } from './actions.ts';
+import { captureEvidence, type Evidence } from './evidence.ts';
+import type { EventLog } from './events.ts';
+import { effectiveOperation, evaluate, type HandbackReason } from './handback.ts';
+import { JevError, type JevClient } from './jev-client.ts';
+import { resolveStartUrl } from './scenarios.ts';
+import { takeSnapshot, type Snapshot } from './snapshot.ts';
+import type { Scenario, Suite } from './types.ts';
+import { findValue, missingFields } from './values.ts';
+
+export type GaveUp = { class: 'app_problem' | 'tooling_or_environment'; reason: string };
+
+export type ScenarioState = {
+  scenario: Scenario;
+  suite: Suite;
+  context: BrowserContext;
+  page: Page;
+  currentStep: number;
+  stepActions: number;
+  scenarioActions: number;
+  claudeActions: number;
+  jevActions: number;
+  startedAt: number;
+  elapsedMs: number;
+  /** Hash of the page right before the last action, and how many actions in a row changed nothing. */
+  hashBeforeLastAction: string | null;
+  unchangedCount: number;
+  recentActions: string[];
+  stepActionLog: string[];
+  lastTypedRef: number | null;
+  lastSnapshot: Snapshot | null;
+  madeUp: Record<string, string>;
+  madeUpUsed: Record<string, string>;
+  handbacks: Array<{ step: number; reason: HandbackReason; detail: string }>;
+  status: 'running' | 'handback' | 'completed' | 'gave_up';
+  gaveUp: GaveUp | null;
+  evidence: Evidence | null;
+  lastNavStatus: number | null;
+  consoleErrors: string[];
+  newTabOpened: boolean;
+  openError: string | null;
+};
+
+export type RunResult = {
+  id: string;
+  status: 'completed' | 'handback' | 'gave_up';
+  step: number;
+  stepText: string | null;
+  reason?: HandbackReason;
+  detail?: string;
+  missingFields?: string[];
+  jevActions: number;
+  claudeActions: number;
+  elapsedMs: number;
+};
+
+export type RunnerTimeouts = { navTimeoutMs?: number; actionTimeoutMs?: number; settleMs?: number };
+
+function watchPage(state: ScenarioState, page: Page): void {
+  page.on('response', (r) => {
+    if (r.request().isNavigationRequest() && r.frame() === page.mainFrame() && page === state.page) state.lastNavStatus = r.status();
+  });
+  page.on('console', (m) => {
+    if (m.type() === 'error' && state.consoleErrors.length < 20) state.consoleErrors.push(m.text().slice(0, 300));
+  });
+  page.on('pageerror', (e) => {
+    if (state.consoleErrors.length < 20) state.consoleErrors.push(`Uncaught: ${e.message}`.slice(0, 300));
+  });
+}
+
+/** Fresh browser context per scenario (§6.1), loaded only from its saved session. */
+export async function openScenario(
+  browser: Browser,
+  suite: Suite,
+  s: Scenario,
+  sessionFile: string | null,
+  madeUp: Record<string, string>,
+  t: RunnerTimeouts = {},
+): Promise<ScenarioState> {
+  const context = await browser.newContext({ viewport: suite.viewport, ...(sessionFile ? { storageState: sessionFile } : {}) });
+  const page = await context.newPage();
+  const state: ScenarioState = {
+    scenario: s, suite, context, page,
+    currentStep: 0, stepActions: 0, scenarioActions: 0, claudeActions: 0, jevActions: 0,
+    startedAt: Date.now(), elapsedMs: 0,
+    hashBeforeLastAction: null, unchangedCount: 0, recentActions: [], stepActionLog: [], lastTypedRef: null, lastSnapshot: null,
+    madeUp, madeUpUsed: {}, handbacks: [], status: 'running', gaveUp: null, evidence: null,
+    lastNavStatus: null, consoleErrors: [], newTabOpened: false, openError: null,
+  };
+  watchPage(state, page);
+  context.on('page', (p) => {
+    if (p !== state.page) {
+      state.newTabOpened = true;
+      watchPage(state, p);
+    }
+  });
+  try {
+    await page.goto(resolveStartUrl(suite, s), { timeout: t.navTimeoutMs ?? DEFAULTS.navTimeoutMs, waitUntil: 'domcontentloaded' });
+  } catch (e) {
+    state.openError = `could not open ${s.start}: ${((e as Error).message ?? '').split('\n')[0]}`;
+  }
+  return state;
+}
+
+export function resultOf(state: ScenarioState, extra: Partial<RunResult> = {}): RunResult {
+  state.elapsedMs = Date.now() - state.startedAt;
+  const steps = state.scenario.steps;
+  return {
+    id: state.scenario.id,
+    status: state.status === 'running' ? 'handback' : state.status,
+    step: state.currentStep,
+    stepText: state.currentStep < steps.length ? steps[state.currentStep] : null,
+    jevActions: state.jevActions,
+    claudeActions: state.claudeActions,
+    elapsedMs: state.elapsedMs,
+    ...extra,
+  };
+}
+
+/** Advances to the next step and resets the per-step counters. */
+export function advanceStep(state: ScenarioState): void {
+  state.currentStep++;
+  state.stepActions = 0;
+  state.stepActionLog = [];
+  state.unchangedCount = 0;
+  state.recentActions = [];
+  state.hashBeforeLastAction = null;
+  state.lastTypedRef = null;
+}
+
+export async function completeScenario(state: ScenarioState, events: EventLog, runDir: string, t: RunnerTimeouts = {}): Promise<RunResult> {
+  state.evidence = await captureEvidence(state, runDir, { settleMs: t.settleMs });
+  state.status = 'completed';
+  const result = resultOf(state);
+  events.append({ type: 'scenario_end', id: state.scenario.id, status: 'completed', elapsedMs: result.elapsedMs });
+  return result;
+}
+
+function handback(state: ScenarioState, events: EventLog, reason: HandbackReason, detail: string, missing?: string[]): RunResult {
+  state.status = 'handback';
+  state.handbacks.push({ step: state.currentStep, reason, detail });
+  events.append({ type: 'handback', id: state.scenario.id, step: state.currentStep, reason, detail, ...(missing ? { missingFields: missing } : {}) });
+  return resultOf(state, { reason, detail, ...(missing ? { missingFields: missing } : {}) });
+}
+
+function hostAllowed(state: ScenarioState): boolean | 'not_http' {
+  try {
+    const u = new URL(state.page.url());
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return 'not_http';
+    return state.suite.allowHosts.includes(u.host);
+  } catch {
+    return 'not_http';
+  }
+}
+
+/** Jev drives the remaining steps until done or a hand-back (§6.2). */
+export async function runJev(state: ScenarioState, deps: { jev: JevClient; events: EventLog; runDir: string } & RunnerTimeouts): Promise<RunResult> {
+  const { jev, events, runDir } = deps;
+  const s = state.scenario;
+  state.status = 'running';
+  if (state.openError) return handback(state, events, 'error', state.openError);
+
+  while (state.currentStep < s.steps.length) {
+    const stepText = s.steps[state.currentStep];
+    const snap = await takeSnapshot(state.page, { frames: false, maxTextChars: DEFAULTS.jevTextChars });
+    state.lastSnapshot = snap;
+    if (state.hashBeforeLastAction !== null) {
+      state.unchangedCount = snap.hash === state.hashBeforeLastAction ? state.unchangedCount + 1 : 0;
+    }
+
+    let answer;
+    try {
+      answer = await jev.decide(buildJevRequest(snap, stepText, state.stepActionLog));
+    } catch (e) {
+      const kind = e instanceof JevError ? e.kind : 'transient';
+      const message = (e as Error).message ?? String(e);
+      return kind === 'fatal' ? handback(state, events, 'jev_unavailable', message) : handback(state, events, 'error', message);
+    }
+    events.append({
+      type: 'jev_decision', id: s.id, step: state.currentStep, latencyMs: answer.latencyMs, operation: answer.operation,
+      target: answer.target, opConfidence: answer.opConfidence, targetConfidence: answer.targetConfidence, usage: answer.usage,
+    });
+
+    const target = answer.target === null ? null : snap.controls.find((c) => c.ref === answer.target) ?? null;
+    const eff = effectiveOperation(answer, target);
+    const needsValue = eff.operation === 'type' || eff.operation === 'select';
+    const value = needsValue && target ? findValue(target.name, stepText, s.values, state.madeUp) : null;
+    const actionKey = `${eff.operation}@${target?.ref ?? '-'}`;
+    const decision = evaluate({
+      answer, target, stepText,
+      stepActions: state.stepActions,
+      scenarioActions: state.scenarioActions,
+      unchangedAfterLastTwo: state.unchangedCount >= 2,
+      sameActionThreeTimes: state.recentActions.length >= 2 && state.recentActions.slice(-2).every((k) => k === actionKey),
+      valueAvailable: value !== null,
+    });
+    if (decision) {
+      const missing = decision.handback === 'needs_text' ? missingFields(snap, s.values, state.madeUp, stepText) : undefined;
+      return handback(state, events, decision.handback, decision.detail, missing);
+    }
+
+    if (eff.operation === 'done') {
+      events.append({ type: 'step_done', id: s.id, step: state.currentStep, actor: 'jev' });
+      advanceStep(state);
+      continue;
+    }
+
+    state.hashBeforeLastAction = snap.hash;
+    const res = await performAction(state, snap, { op: eff.operation as ActionOp, ref: target?.ref, value: value?.value }, deps);
+    events.append({
+      type: 'action', id: s.id, step: state.currentStep, actor: 'jev', op: eff.operation, ref: target?.ref ?? null,
+      label: target?.name ?? null, ...(value ? { valueSource: value.source } : {}),
+      ...(value && !target?.isPassword ? { value: value.value } : {}), ok: res.ok,
+    });
+    state.jevActions++;
+    state.stepActions++;
+    state.scenarioActions++;
+    state.recentActions.push(actionKey);
+    state.stepActionLog.push(`${eff.operation}${target ? ` [${target.ref}] "${target.name}"` : ''}${value && !target?.isPassword ? ` = "${value.value}"` : ''}`);
+    if (value?.source === 'made_up' && target) state.madeUpUsed[target.name] = value.value;
+    if (eff.operation === 'type' && target) state.lastTypedRef = target.ref;
+
+    if (!res.ok) return handback(state, events, 'error', res.detail);
+    const allowed = hostAllowed(state);
+    if (allowed === 'not_http') return handback(state, events, 'error', `navigation failed (${state.page.url()})`);
+    if (!allowed) return handback(state, events, 'left_allowed_hosts', `navigated to ${state.page.url()}`);
+    if (state.newTabOpened) return handback(state, events, 'new_tab', 'a new tab or popup opened');
+  }
+  return completeScenario(state, events, runDir, deps);
+}

@@ -1,0 +1,7 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Pricing</title></head><body>
+<h1>Pricing</h1><div role="tablist"><button id="m" role="tab">Monthly</button> <button id="a" role="tab">Annual</button></div>
+<p id="price">$10 / month</p><p id="badge" hidden><strong>Save 20%</strong></p>
+<script>
+document.getElementById('a').onclick = () => { document.getElementById('price').textContent = '$96 / year'; document.getElementById('badge').hidden = false; };
+document.getElementById('m').onclick = () => { document.getElementById('price').textContent = '$10 / month'; document.getElementById('badge').hidden = true; };
+</script></body></html>

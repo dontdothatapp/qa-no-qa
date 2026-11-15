@@ -33,4 +33,5 @@ scenarios:
 - **Say when to submit.** Forms are only submitted when a step asks for it.
 - **Values** go in `values` (field label → text). Unspecified fields may be filled with obviously fake test data by Claude, and those values are listed in the report.
 - **Expected results must be observable** on the final page: visible text, elements, layout. Split several checks with `;`.
+- **Quote text that contains `: `** (colon + space), e.g. `expected: 'Cart shows "Cart: 1"'`, or YAML will reject the file.
 - **No secrets.** Never put real passwords in the file; use `session` with `qa login` instead.

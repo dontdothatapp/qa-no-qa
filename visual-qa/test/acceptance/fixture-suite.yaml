@@ -1,0 +1,81 @@
+# Live acceptance suite (plan Task 14). Serve the fixtures first: node test/fixtures/serve.ts
+# BRK-* scenarios are deliberately broken: none of them may come out PASS.
+topic: Fixture acceptance
+base_url: http://localhost:4173
+scenarios:
+  - id: NAV-01
+    title: Home links to the shop
+    start: /index.html
+    steps: ['Click "Shop"']
+    expected: 'The shop page shows "Cart: 0" and two products, Backpack and Bolt T-Shirt'
+
+  - id: SRCH-01
+    title: Search submits on Enter
+    start: /search.html
+    steps: ['Search for "espresso"']
+    expected: 'The results list shows "Espresso — strong Italian coffee"'
+
+  - id: FORM-01
+    title: Shipping form submits
+    start: /form.html
+    steps: [Fill the shipping form, 'Click "Submit"']
+    values: {Name: Test User, Email: qa@example.com, Postcode: "10115", Password: fixture-only-pass}
+    expected: 'The page says "Thanks! Your form was submitted."'
+
+  - id: SHOP-01
+    title: Add the right product when labels repeat
+    start: /shop.html
+    steps: ['Click "Add to cart" for the Backpack']
+    expected: 'The cart shows "Cart: 1" and the page says "Added Backpack"'
+
+  - id: IFR-01
+    title: Accept terms inside an iframe
+    start: /iframe.html
+    steps: ['Click "Accept terms"']
+    expected: 'The terms box says "Accepted"'
+
+  - id: UPL-01
+    title: Upload an attachment
+    start: /upload.html
+    steps: ['Upload the attachment file']
+    values: {Attachment: ../fixtures/site/sample.txt}
+    expected: 'The page shows "Chosen: sample.txt"'
+
+  - id: ACC-01
+    title: Saved login opens the account page
+    session: fixture-user
+    start: /account.html
+    steps: [Check that the account overview is shown]
+    expected: 'The page greets "Welcome, Test User"'
+
+  - id: DE-01
+    title: German address form
+    start: /de.html
+    steps: [Fill the address form, 'Click "Absenden"']
+    values: {Vorname: Test, Straße: Teststraße 1}
+    expected: 'The page says "Thanks! Your form was submitted."'
+
+  - id: BRK-01
+    title: "[broken] Cart counter does not increase"
+    start: /broken/shop.html
+    steps: ['Click "Add to cart" for the Backpack']
+    expected: 'The cart shows "Cart: 1"'
+
+  - id: BRK-02
+    title: "[broken] Annual pricing badge missing"
+    start: /broken/pricing.html
+    steps: ['Click "Annual"']
+    expected: 'Prices show yearly totals ("$96 / year") and a "Save 20%" badge'
+
+  - id: BRK-03
+    title: "[broken] Form submit does nothing"
+    start: /broken/form.html
+    steps: [Fill the shipping form, 'Click "Submit"']
+    values: {Name: Test User, Email: qa@example.com, Postcode: "10115", Password: fixture-only-pass}
+    expected: 'The page says "Thanks! Your form was submitted."'
+
+  - id: BRK-04
+    title: "[broken] Search returns nothing"
+    start: /broken/search.html
+    steps: ['Search for "espresso"']
+    expected: 'The results list mentions espresso'

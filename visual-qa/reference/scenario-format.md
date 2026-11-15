@@ -14,7 +14,7 @@ judge_model: sonnet                     # optional: sonnet | haiku | opus
 scenarios:
   - id: CO-01                           # letters, digits, - and _ only; unique
     title: Guest can reach the payment step
-    session: none                       # optional per-scenario override; none = logged out
+    # session: none                     # isolated mode only: per-scenario override; none = logged out
     start: /products/backpack           # path or full URL
     steps:                              # 1 step = 1 small goal; 3–5 steps per scenario is ideal
       - Click "Add to cart"

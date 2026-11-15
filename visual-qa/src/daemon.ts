@@ -196,7 +196,7 @@ export async function startDaemon(runDir: string, opts: DaemonOptions = {}): Pro
       const value = a.value === undefined || a.value === null ? undefined : String(a.value);
       const control = ref === undefined ? null : snap.controls.find((c) => c.ref === ref) ?? null;
       if (op === 'type' && control?.isPassword) {
-        throw new CommandError('refusing to type into a password field — use a saved session (qa login) or put the value in the scenario values');
+        throw new CommandError('refusing to type into a password field — passwords are never filled; sign in to the site in your Chrome (or use qa login in isolated mode)');
       }
       if (op === 'goto' && value !== undefined && isAllowedUrl(value, run.suite.allowHosts) !== true) {
         throw new CommandError(`refusing to open ${value}: host is not in allow_hosts (${run.suite.allowHosts.join(', ')})`);

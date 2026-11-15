@@ -68,6 +68,8 @@ export function loadSuite(file: string): Suite {
   const browser = (browserRaw === 'isolated' ? 'isolated' : 'chrome') as BrowserMode;
   const SESSION_NAME = /^[A-Za-z0-9_-]+$/;
   const fileSession = str(doc.session);
+  const LOGGED_OUT_IN_CHROME = 'session: none (logged out) cannot run in chrome mode — use browser: isolated for logged-out scenarios';
+  if (browser === 'chrome' && fileSession?.toLowerCase() === 'none') problems.push(LOGGED_OUT_IN_CHROME);
   if (fileSession && fileSession.toLowerCase() !== 'none' && !SESSION_NAME.test(fileSession)) {
     problems.push('session: name may only contain letters, digits, - and _');
   }
@@ -120,6 +122,8 @@ export function loadSuite(file: string): Suite {
       }
 
       const ownSession = raw.session === undefined ? fileSession : str(raw.session);
+      // in chrome mode every tab carries the user's sign-ins, so "logged out" would silently be false
+      if (browser === 'chrome' && raw.session !== undefined && ownSession?.toLowerCase() === 'none') problems.push(`${id}: ${LOGGED_OUT_IN_CHROME}`);
       const session = ownSession && ownSession.toLowerCase() !== 'none' ? ownSession : null;
       if (raw.session !== undefined && session && !SESSION_NAME.test(session)) problems.push(`${id}: session name may only contain letters, digits, - and _`);
 

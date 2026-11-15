@@ -33,7 +33,8 @@ Run `node ${CLAUDE_SKILL_DIR}/bin/qa.ts start <file> --session ${CLAUDE_SESSION_
 - An error naming a missing session → show the user the exact `login` command from the error (they run it in their own terminal, sign in, close the window), then stop.
 - "a run is already active" → ask the user whether to end that run (`node ${CLAUDE_SKILL_DIR}/bin/qa.ts stop`), then start again.
 - Any other error (e.g. invalid scenario file) → show it, fix the YAML with the user, and start again.
-- Chrome mode: before running `start`, tell the user to click **Allow** in Chrome when it asks (the connection waits up to 110 s).
+- Chrome mode: before running `start`, tell the user to click **Allow** in Chrome when it asks (it waits about 100 s), and that scenario tabs will come to the front of their Chrome during the run, so they should not type in Chrome until it finishes.
+- Chrome mode connection errors (Chrome "did not allow the connection", "refused the connection", "not reachable") → tell the user the message; they fix it (click Allow / switch on remote debugging) and you start again. Do not touch the YAML.
 - On success, note `runDir`, `browser`, the `scenarios` list and `judgeModel`, and pass on any `note`.
 
 ## 4. Run each scenario, in order

@@ -221,10 +221,6 @@ export async function runJev(state: ScenarioState, deps: { jev: JevClient; event
   }
 
   while (state.currentStep < s.steps.length) {
-    // the page may have redirected (start page, or after Claude acted) — never let Jev act off-site
-    const where = hostAllowed(state);
-    if (where === 'not_http') return handback(state, events, 'error', `page did not load (${state.page.url()})`);
-    if (!where) return handback(state, events, 'left_allowed_hosts', `page is on ${state.page.url()}`);
     if (state.crashed) return handback(state, events, 'error', 'the page crashed');
     const stepText = s.steps[state.currentStep];
     let snap: Snapshot;
@@ -233,6 +229,11 @@ export async function runJev(state: ScenarioState, deps: { jev: JevClient; event
     } catch (e) {
       return handback(state, events, 'error', (e as Error).message);
     }
+    // check the URL the snapshot was actually taken on (the page may have redirected, e.g. to a sign-in
+    // page on another host): never let Jev act off-site or send that page's text to TypeSafe
+    const where = isAllowedUrl(snap.url, state.suite.allowHosts);
+    if (where === 'not_http') return handback(state, events, 'error', `page did not load (${snap.url})`);
+    if (!where) return handback(state, events, 'left_allowed_hosts', `page is on ${snap.url}`);
     state.lastSnapshot = snap;
     if (state.hashBeforeLastAction !== null) {
       state.unchangedCount = snap.hash === state.hashBeforeLastAction ? state.unchangedCount + 1 : 0;

@@ -14,6 +14,7 @@ function writeYaml(content: string): string {
 
 const SPEC_EXAMPLE = `
 topic: Checkout flow
+browser: isolated
 base_url: https://staging.example.com
 session: staging-user
 judge_model: haiku
@@ -165,4 +166,13 @@ test('browser mode: chrome by default, isolated on request, others rejected', ()
   assert.equal(loadSuite(writeYaml(base)).browser, 'chrome');
   assert.equal(loadSuite(writeYaml(`browser: isolated\n${base}`)).browser, 'isolated');
   assert.ok(problemsOf(`browser: firefox\n${base}`).includes('browser: must be chrome or isolated'));
+});
+
+test('session: none (logged out) is rejected in chrome mode (I4)', () => {
+  const sc = '  - {id: A, title: a, start: /, steps: [x], expected: y, session: none}\n';
+  assert.ok(problemsOf(`topic: T\nbase_url: https://a.example\nscenarios:\n${sc}`)
+    .includes('A: session: none (logged out) cannot run in chrome mode — use browser: isolated for logged-out scenarios'));
+  assert.ok(problemsOf(`topic: T\nbase_url: https://a.example\nsession: none\nscenarios:\n  - {id: B, title: b, start: /, steps: [x], expected: y}\n`)
+    .includes('session: none (logged out) cannot run in chrome mode — use browser: isolated for logged-out scenarios'));
+  assert.equal(loadSuite(writeYaml(`topic: T\nbrowser: isolated\nbase_url: https://a.example\nscenarios:\n${sc}`)).scenarios[0].session, null);
 });

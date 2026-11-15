@@ -78,3 +78,11 @@ test('SKILL.md covers chrome mode: Allow click, signed-in text to TypeSafe, real
   assert.match(body, /signed-in pages/);
   assert.match(body, /real accounts/);
 });
+
+test('chrome-mode wording: sign-in advice, connection errors, tabs come to the front', () => {
+  assert.match(read('reference/takeover.md'), /sign in to the site in your Chrome/);
+  const { body } = split(read('SKILL.md'));
+  assert.match(body, /did not allow the connection/);
+  assert.match(body, /come to the front/);
+  assert.doesNotMatch(body, /110 s/);
+});

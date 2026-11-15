@@ -83,6 +83,24 @@ test('run → handback → act ×2 → step-done completes the scenario', async 
   }
 });
 
+test('report command writes report.html and results.json', async () => {
+  const { d, runDir } = await inProcess([{ operation: 'type', target: 1 }, { operation: 'press_enter', target: 1 }, { operation: 'done' }]);
+  try {
+    await cmd(d, 'run', { id: 'S1' });
+    fs.writeFileSync(path.join(runDir, 'scenarios', 'S1', 'judge.json'), JSON.stringify({
+      keyPoints: [{ point: 'results mention espresso', status: 'met', evidence: 'Espresso machine', source: 'text' }], verdict: 'pass', reason: 'ok',
+    }));
+    const r = await cmd(d, 'report');
+    assert.equal(r.body.ok, true, r.body.error ?? '');
+    assert.equal(r.body.result.reportPath, path.join(runDir, 'report.html'));
+    assert.equal(r.body.result.summary, '1 pass · 1 needs review');
+    assert.ok(fs.existsSync(path.join(runDir, 'results.json')));
+    assert.match(fs.readFileSync(path.join(runDir, 'report.html'), 'utf8'), /data:image\/jpeg;base64,/);
+  } finally {
+    await d.close();
+  }
+});
+
 test('act beyond the takeover budget is refused', async () => {
   const { d } = await inProcess([{ operation: 'click', target: 1, opConfidence: 0.4 }], { takeoverBudget: 2 });
   try {

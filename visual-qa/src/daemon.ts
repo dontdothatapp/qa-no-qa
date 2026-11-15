@@ -14,6 +14,7 @@ import {
   type GaveUp, type RunnerTimeouts, type ScenarioState,
 } from './scenario-runner.ts';
 import { formatControl, takeSnapshot } from './snapshot.ts';
+import { writeReport } from './report.ts';
 import type { Suite } from './types.ts';
 
 export type ScenarioRecord = {
@@ -247,7 +248,7 @@ export async function startDaemon(runDir: string, opts: DaemonOptions = {}): Pro
     },
 
     async report() {
-      throw new CommandError('not implemented');
+      return writeReport(runDir);
     },
 
     async stop() {

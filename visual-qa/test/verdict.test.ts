@@ -49,6 +49,12 @@ test('a met text quote not on the page → needs_review with the quote listed', 
   assert.deepEqual(v.quoteProblems, ['Save 25% today']);
 });
 
+test('all points met but the judge says fail → needs_review, never pass (C1)', () => {
+  const v = computeVerdict({ judge: judge([met('cart', 'Cart')], 'fail', 'Cart still shows 0 items'), pageText: 'Cart: 0', gaveUp: null });
+  assert.equal(v.verdict, 'needs_review');
+  assert.match(v.reason, /disagrees/);
+});
+
 test('a met point with no evidence → needs_review', () => {
   assert.equal(computeVerdict({ judge: judge([met('badge', '  ', 'screenshot')]), pageText: PAGE, gaveUp: null }).verdict, 'needs_review');
 });

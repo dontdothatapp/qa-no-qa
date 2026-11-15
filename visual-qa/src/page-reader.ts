@@ -15,6 +15,10 @@ export type RawControl = {
   context: string | null;
   inViewport: boolean;
   isPassword: boolean;
+  /** A control that submits its form (submit input, or a button whose type is submit inside a form). */
+  isSubmit: boolean;
+  /** For fields inside a form: the label of the form's default submit control (what Enter would trigger). */
+  formSubmitLabel: string | null;
 };
 
 export type RawPage = { url: string; title: string; text: string; controls: RawControl[] };
@@ -105,6 +109,15 @@ export function readPage(args: { startRef: number; maxTextChars: number }): RawP
         if (el.hasAttribute('disabled')) state = state ? `${state}, disabled` : 'disabled';
         const expanded = el.getAttribute('aria-expanded');
         if (expanded) state = state ? `${state}, expanded=${expanded}` : `expanded=${expanded}`;
+        const form = (el as HTMLInputElement).form ?? null;
+        const isSubmit =
+          (tag === 'input' && (input.type === 'submit' || input.type === 'image')) ||
+          (tag === 'button' && (el as HTMLButtonElement).type === 'submit' && !!form);
+        let formSubmitLabel: string | null = null;
+        if (form && !isSubmit && (tag === 'input' || tag === 'textarea' || tag === 'select')) {
+          const sub = form.querySelector('button[type=submit], button:not([type]), input[type=submit], input[type=image]');
+          if (sub) formSubmitLabel = clean(labelText(sub), 100) || 'Submit';
+        }
         const holder = el.parentElement?.closest(CONTEXT_SEL);
         const r = el.getBoundingClientRect();
         el.setAttribute('data-qa-ref', String(ref));
@@ -118,6 +131,8 @@ export function readPage(args: { startRef: number; maxTextChars: number }): RawP
           context: holder ? clean((holder as HTMLElement).innerText, 80) : null,
           inViewport: r.bottom > 0 && r.right > 0 && r.top < vh && r.left < vw,
           isPassword,
+          isSubmit,
+          formSubmitLabel,
         });
         ref++;
       }

@@ -19,6 +19,8 @@ export type HandbackReason =
 export type DecisionContext = {
   answer: JevAnswer;
   target: Control | null;
+  /** The field Enter would be pressed in (target, else the last field typed into this step). */
+  enterField: Control | null;
   stepText: string;
   stepActions: number;
   scenarioActions: number;
@@ -30,6 +32,28 @@ export type DecisionContext = {
 
 const NEEDS_TARGET = new Set<Operation>(['click', 'type', 'select']);
 const RISKY = /\b(pay|purchase|place order|buy now|delete|remove|confirm)\b/i;
+const SUBMIT_WORDS = /\b(submit|send)\b/i;
+const ENTER_WORDS = /\b(search|enter|submit|send|press|go|find|look up)\b/i;
+const norm = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim();
+
+/** Why a click on `target` is a side effect the step didn't ask for, or null. */
+function riskyClick(target: Control, stepText: string): string | null {
+  const risky = target.name.match(RISKY);
+  if (risky && !new RegExp(`\\b${risky[1]}\\b`, 'i').test(stepText)) return `"${target.name}" was not asked for by the step`;
+  if (target.isSubmit && !SUBMIT_WORDS.test(stepText) && !(target.name && norm(stepText).includes(norm(target.name)))) {
+    return `"${target.name}" submits a form and the step does not ask to submit`;
+  }
+  return null;
+}
+
+/** Why pressing Enter here is a side effect the step didn't ask for, or null. */
+function riskyEnter(field: Control | null, stepText: string): string | null {
+  if (!ENTER_WORDS.test(stepText)) return 'pressing Enter could submit a form and the step does not ask to search, enter or submit';
+  const submit = field?.formSubmitLabel;
+  const risky = submit?.match(RISKY);
+  if (submit && risky && !new RegExp(`\\b${risky[1]}\\b`, 'i').test(stepText)) return `Enter would trigger "${submit}", which the step does not ask for`;
+  return null;
+}
 
 /**
  * Click and type on a text field are one intent ("fill this field"); Jev sometimes splits
@@ -60,12 +84,9 @@ export function evaluate(ctx: DecisionContext, d: Defaults = DEFAULTS): { handba
   }
   if (eff.operation === 'done') return null;
 
-  if (target) {
-    const risky = target.name.match(RISKY);
-    if (risky && !new RegExp(`\\b${risky[1]}\\b`, 'i').test(ctx.stepText)) {
-      return { handback: 'risky_target', detail: `"${target.name}" was not asked for by the step` };
-    }
-  }
+  const risk =
+    eff.operation === 'click' && target ? riskyClick(target, ctx.stepText) : eff.operation === 'press_enter' ? riskyEnter(ctx.enterField ?? target, ctx.stepText) : null;
+  if (risk) return { handback: 'risky_target', detail: risk };
   if (ctx.unchangedAfterLastTwo || ctx.sameActionThreeTimes) {
     return { handback: 'no_progress', detail: 'the page did not change after repeated actions' };
   }

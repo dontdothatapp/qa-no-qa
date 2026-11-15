@@ -4,7 +4,7 @@ import { buildJevRequest } from '../src/decide.ts';
 import type { Control, Snapshot } from '../src/snapshot.ts';
 
 function control(ref: number, inViewport: boolean, name = `Item ${ref}`): Control {
-  return { ref, frame: 0, role: 'link', name, inputType: null, value: null, state: null, context: null, inViewport, isPassword: false };
+  return { ref, frame: 0, role: 'link', name, inputType: null, value: null, state: null, context: null, inViewport, isPassword: false, isSubmit: false, formSubmitLabel: null };
 }
 
 function snapshot(controls: Control[], text = 'hello'): Snapshot {

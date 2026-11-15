@@ -69,5 +69,8 @@ export function computeVerdict(i: { judge: JudgeOutput | null; pageText: string;
   if (quoteProblems.length) {
     return { verdict: 'needs_review', reason: `judge quoted text that is not on the page: "${quoteProblems[0]}"`, quoteProblems };
   }
+  if (i.judge.verdict !== 'pass') {
+    return { verdict: 'needs_review', reason: `judge's verdict (${i.judge.verdict}) disagrees with its key points: ${i.judge.reason}`, quoteProblems: [] };
+  }
   return { verdict: 'pass', reason: i.judge.reason || 'all expected points met', quoteProblems: [] };
 }

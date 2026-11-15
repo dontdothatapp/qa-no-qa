@@ -189,8 +189,10 @@ export async function runJev(state: ScenarioState, deps: { jev: JevClient; event
     const needsValue = eff.operation === 'type' || eff.operation === 'select';
     const value = needsValue && target ? findValue(target.name, stepText, s.values, state.madeUp) : null;
     const actionKey = `${eff.operation}@${target?.ref ?? '-'}`;
+    const lastTyped = state.lastTypedRef === null ? null : snap.controls.find((c) => c.ref === state.lastTypedRef) ?? null;
     const decision = evaluate({
       answer, target, stepText,
+      enterField: target ?? lastTyped,
       stepActions: state.stepActions,
       scenarioActions: state.scenarioActions,
       unchangedAfterLastTwo: state.unchangedCount >= 2,

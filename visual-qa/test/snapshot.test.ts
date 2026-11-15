@@ -93,3 +93,13 @@ test('text excerpt respects maxTextChars and refs are sequential from 1', async 
   assert.ok(snap.controls[0].inViewport);
   assert.equal(snap.controls[299].inViewport, false);
 });
+
+test('submit buttons and the form submit label of each field are reported', async () => {
+  const page = await fx.newPage('form.html');
+  const snap = await takeSnapshot(page, MAIN);
+  assert.equal(snap.controls.find((c) => c.name === 'Submit')?.isSubmit, true);
+  assert.equal(snap.controls.find((c) => c.name === 'Name')?.isSubmit, false);
+  assert.equal(snap.controls.find((c) => c.name === 'Name')?.formSubmitLabel, 'Submit');
+  const search = await takeSnapshot(await fx.newPage('search.html'), MAIN);
+  assert.equal(search.controls[0].formSubmitLabel, null);
+});

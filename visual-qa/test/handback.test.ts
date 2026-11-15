@@ -4,15 +4,15 @@ import { evaluate, effectiveOperation, type DecisionContext } from '../src/handb
 import type { JevAnswer } from '../src/jev-client.ts';
 import type { Control } from '../src/snapshot.ts';
 
-const button = (name = 'Continue'): Control => ({ ref: 3, frame: 0, role: 'button', name, inputType: null, value: null, state: null, context: null, inViewport: true, isPassword: false });
-const field = (name = 'Name', isPassword = false): Control => ({ ref: 4, frame: 0, role: 'textbox', name, inputType: isPassword ? 'password' : 'text', value: '', state: null, context: null, inViewport: true, isPassword });
+const button = (name = 'Continue', isSubmit = false): Control => ({ ref: 3, frame: 0, role: 'button', name, inputType: null, value: null, state: null, context: null, inViewport: true, isPassword: false, isSubmit, formSubmitLabel: null });
+const field = (name = 'Name', isPassword = false, formSubmitLabel: string | null = null): Control => ({ ref: 4, frame: 0, role: 'textbox', name, inputType: isPassword ? 'password' : 'text', value: '', state: null, context: null, inViewport: true, isPassword, isSubmit: false, formSubmitLabel });
 
 function answer(p: Partial<JevAnswer>): JevAnswer {
   return { operation: 'click', opConfidence: 0.95, opProbabilities: {}, target: 3, targetConfidence: 0.95, usage: { inputTokens: 1, outputTokens: 1 }, latencyMs: 1, ...p };
 }
 
 function ctx(p: Partial<DecisionContext>): DecisionContext {
-  return { answer: answer({}), target: button(), stepText: 'Click "Continue"', stepActions: 0, scenarioActions: 0, unchangedAfterLastTwo: false, sameActionThreeTimes: false, valueAvailable: true, ...p };
+  return { answer: answer({}), target: button(), enterField: null, stepText: 'Click "Continue"', stepActions: 0, scenarioActions: 0, unchangedAfterLastTwo: false, sameActionThreeTimes: false, valueAvailable: true, ...p };
 }
 
 test('confident click proceeds', () => assert.equal(evaluate(ctx({})), null));
@@ -29,7 +29,19 @@ test('low confidence done → low_confidence', () =>
 test('click without target → low_confidence', () =>
   assert.equal(evaluate(ctx({ answer: answer({ target: null }), target: null }))?.handback, 'low_confidence'));
 test('press_enter needs no target', () =>
-  assert.equal(evaluate(ctx({ answer: answer({ operation: 'press_enter', target: null, targetConfidence: 0.06 }), target: null })), null));
+  assert.equal(evaluate(ctx({ answer: answer({ operation: 'press_enter', target: null, targetConfidence: 0.06 }), target: null, stepText: 'Search for "x"' })), null));
+test('press_enter in a step that never asks to enter/submit → risky_target (C2)', () =>
+  assert.equal(evaluate(ctx({ answer: answer({ operation: 'press_enter', target: null }), target: null, enterField: field('Coupon'), stepText: 'Fill the coupon field' }))?.handback, 'risky_target'));
+test('press_enter that would submit a "Place order" form → risky_target (C2)', () =>
+  assert.equal(evaluate(ctx({ answer: answer({ operation: 'press_enter', target: null }), target: null, enterField: field('Coupon', false, 'Place order'), stepText: 'Enter "SAVE10" in the coupon field' }))?.handback, 'risky_target'));
+test('press_enter submitting a search form → proceed', () =>
+  assert.equal(evaluate(ctx({ answer: answer({ operation: 'press_enter', target: 4 }), target: field('Search', false, 'Go'), enterField: field('Search', false, 'Go'), stepText: 'Search for "espresso"' })), null));
+test('clicking a submit button the step did not ask for → risky_target (I11)', () =>
+  assert.equal(evaluate(ctx({ target: button('Send', true), stepText: 'Fill the contact form' }))?.handback, 'risky_target'));
+test('clicking the submit button the step names → proceed', () =>
+  assert.equal(evaluate(ctx({ target: button('Send', true), stepText: 'Click "Send"' })), null));
+test('typing into a "Confirm email" field is not risky (M2)', () =>
+  assert.equal(evaluate(ctx({ answer: answer({ operation: 'type', target: 4 }), target: field('Confirm email'), stepText: 'Fill the form' })), null));
 test('type without a value → needs_text', () =>
   assert.equal(evaluate(ctx({ answer: answer({ operation: 'type', target: 4 }), target: field(), valueAvailable: false }))?.handback, 'needs_text'));
 test('password field without a value → needs_text', () =>

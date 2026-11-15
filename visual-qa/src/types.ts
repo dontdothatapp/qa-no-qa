@@ -11,8 +11,12 @@ export type Scenario = {
   expected: string;
 };
 
+export type BrowserMode = 'chrome' | 'isolated';
+
 export type Suite = {
   topic: string;
+  /** chrome = tabs in the user's running Chrome (shared sign-ins and state); isolated = separate headless Chromium. */
+  browser: BrowserMode;
   baseUrl: string;
   viewport: Viewport;
   allowHosts: string[];

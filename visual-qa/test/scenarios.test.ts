@@ -159,3 +159,10 @@ scenarios:
   assert.ok(problems.includes('A: passwords are not supported in values ("PIN code") — use a signed-in browser session'), problems.join('\n'));
   assert.equal(problems.length, 2);
 });
+
+test('browser mode: chrome by default, isolated on request, others rejected', () => {
+  const base = 'topic: T\nbase_url: https://a.example\nscenarios:\n  - {id: A, title: a, start: /, steps: [x], expected: y}\n';
+  assert.equal(loadSuite(writeYaml(base)).browser, 'chrome');
+  assert.equal(loadSuite(writeYaml(`browser: isolated\n${base}`)).browser, 'isolated');
+  assert.ok(problemsOf(`browser: firefox\n${base}`).includes('browser: must be chrome or isolated'));
+});

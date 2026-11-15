@@ -5,8 +5,10 @@ One YAML file per test topic. The topic names the report folder: `~/QA/<YYYY-MM-
 ```yaml
 topic: Checkout flow                    # required
 base_url: https://staging.example.com   # required; scenario `start` paths are resolved against it
+browser: chrome                         # optional: chrome (default) = tabs in your running Chrome, with your sign-ins
+                                        #           isolated = a separate invisible browser (use `session` for logins)
 viewport: {width: 1280, height: 800}    # optional (default shown)
-session: staging-user                   # optional: saved login for every scenario (`qa login <name> <url>`)
+session: staging-user                   # optional, isolated mode only: saved login (`qa login <name> <url>`)
 allow_hosts: [staging.example.com]      # optional (default: the base_url host); leaving them hands back to Claude
 judge_model: sonnet                     # optional: sonnet | haiku | opus
 scenarios:
@@ -27,7 +29,9 @@ scenarios:
 
 ## Writing good scenarios
 
-- **Self-contained.** Every scenario starts in a fresh browser (only the saved login carries over), so its steps must create whatever the expected result depends on (e.g. add the item before checking the cart).
+- **Self-contained.** Steps must create whatever the expected result depends on (e.g. add the item before checking the cart).
+  - In `browser: chrome` (default) scenarios run as tabs in your Chrome and **share your sign-ins and site state** — a cart filled by one scenario is still full in the next. Put any reset in the steps (e.g. "Empty the cart"), or use `browser: isolated` when a clean state matters more than your sign-ins.
+  - In `browser: isolated` every scenario starts in a fresh browser; only a saved `session` carries over.
 - **One goal per step**, phrased as an instruction: `Click "Checkout"`, `Search for "espresso"`, `Select "Annual" in the plan dropdown`.
 - **Quote exact button or link text** with double quotes. A single quoted value in a typing step (`Search for "espresso"`) is typed as-is.
 - **Say when to submit.** Forms are only submitted when a step asks for it.

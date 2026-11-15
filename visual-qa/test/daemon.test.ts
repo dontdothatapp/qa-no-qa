@@ -28,6 +28,7 @@ function tmp(name: string): string {
 function suiteFile(dir: string): string {
   const file = path.join(dir, 'suite.yaml');
   fs.writeFileSync(file, `topic: Daemon test
+browser: isolated
 base_url: ${server.url}/
 scenarios:
   - id: S1
@@ -294,7 +295,7 @@ test('qa report works without a live daemon (I9)', async () => {
 test('qa start reports a missing saved session with the login command', async () => {
   const dir = tmp('session');
   const file = path.join(dir, 'suite.yaml');
-  fs.writeFileSync(file, `topic: T\nbase_url: ${server.url}/\nsession: staging-user\nscenarios:\n  - {id: A, title: a, start: /, steps: [x], expected: y}\n`);
+  fs.writeFileSync(file, `topic: T\nbrowser: isolated\nbase_url: ${server.url}/\nsession: staging-user\nscenarios:\n  - {id: A, title: a, start: /, steps: [x], expected: y}\n`);
   const env = cliEnv(path.join(dir, 'state'), path.join(dir, 'out'), path.join(dir, 'none.json'));
   const r = await qa(['start', file, '--session', 'x'], env);
   assert.notEqual(r.code, 0);

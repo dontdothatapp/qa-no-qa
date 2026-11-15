@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parse } from 'yaml';
 import { DEFAULTS } from './config.ts';
-import type { Scenario, Suite, Viewport } from './types.ts';
+import type { BrowserMode, Scenario, Suite, Viewport } from './types.ts';
 
 export class SuiteError extends Error {
   problems: string[];
@@ -63,6 +63,9 @@ export function loadSuite(file: string): Suite {
     }
   }
 
+  const browserRaw = str(doc.browser) ?? 'chrome';
+  if (browserRaw !== 'chrome' && browserRaw !== 'isolated') problems.push('browser: must be chrome or isolated');
+  const browser = (browserRaw === 'isolated' ? 'isolated' : 'chrome') as BrowserMode;
   const SESSION_NAME = /^[A-Za-z0-9_-]+$/;
   const fileSession = str(doc.session);
   if (fileSession && fileSession.toLowerCase() !== 'none' && !SESSION_NAME.test(fileSession)) {
@@ -135,6 +138,7 @@ export function loadSuite(file: string): Suite {
   if (problems.length) throw new SuiteError(problems);
   return {
     topic: topic as string,
+    browser,
     baseUrl: (baseUrl as URL).href,
     viewport,
     allowHosts,

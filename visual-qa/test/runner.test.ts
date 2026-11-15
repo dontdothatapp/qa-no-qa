@@ -18,7 +18,7 @@ function scenario(p: Partial<Scenario>): Scenario {
 }
 
 function suiteFor(s: Scenario, allowHosts?: string[]): Suite {
-  return { topic: 'T', baseUrl: fx.baseUrl() + '/', viewport: { width: 1280, height: 800 }, allowHosts: allowHosts ?? [new URL(fx.baseUrl()).host], judgeModel: 'sonnet', scenarios: [s], sourcePath: '/x.yaml' };
+  return { topic: 'T', browser: 'isolated', baseUrl: fx.baseUrl() + '/', viewport: { width: 1280, height: 800 }, allowHosts: allowHosts ?? [new URL(fx.baseUrl()).host], judgeModel: 'sonnet', scenarios: [s], sourcePath: '/x.yaml' };
 }
 
 async function start(s: Scenario, allowHosts?: string[]): Promise<{ state: ScenarioState; runDir: string }> {

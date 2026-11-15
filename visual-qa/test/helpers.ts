@@ -25,3 +25,16 @@ export function useBrowserAndFixtures(): { browser: () => Browser; baseUrl: () =
     },
   };
 }
+
+/** A Chromium with a debug port, standing in for "the user's Chrome". Returns its CDP endpoint. */
+export async function launchStandInChrome(): Promise<{ endpoint: string; launched: Browser; close(): Promise<void> }> {
+  const net = await import('node:net');
+  const port = await new Promise<number>((resolve) => {
+    const srv = net.createServer().listen(0, '127.0.0.1', () => {
+      const p = (srv.address() as import('node:net').AddressInfo).port;
+      srv.close(() => resolve(p));
+    });
+  });
+  const launched = await chromium.launch({ args: [`--remote-debugging-port=${port}`] });
+  return { endpoint: `http://127.0.0.1:${port}`, launched, close: () => launched.close() };
+}

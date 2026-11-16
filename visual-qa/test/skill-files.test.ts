@@ -8,6 +8,8 @@ import { COMMANDS } from '../bin/qa.ts';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (p: string) => fs.readFileSync(path.join(ROOT, p), 'utf8');
+const TEST_SKILL = 'skills/test/SKILL.md';
+const SETUP_SKILL = 'skills/setup/SKILL.md';
 
 function split(md: string): { front: Record<string, unknown>; body: string } {
   const m = md.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
@@ -15,16 +17,16 @@ function split(md: string): { front: Record<string, unknown>; body: string } {
   return { front: parse(m[1]), body: m[2] };
 }
 
-test('frontmatter: manual-only, runs on sonnet, named visual-qa', () => {
-  const { front } = split(read('SKILL.md'));
-  assert.equal(front.name, 'visual-qa');
-  assert.equal(front['disable-model-invocation'], true);
+test('test skill frontmatter: named test, runs on sonnet, model invocation on, plugin-root qa command allowed', () => {
+  const { front } = split(read(TEST_SKILL));
+  assert.equal(front.name, 'test');
   assert.equal(front.model, 'sonnet');
-  assert.match(String(front['allowed-tools']), /Bash\(node \$\{CLAUDE_SKILL_DIR\}\/bin\/qa\.ts \*\)/);
+  assert.ok(!('disable-model-invocation' in front));
+  assert.match(String(front['allowed-tools']), /Bash\(node \$\{CLAUDE_PLUGIN_ROOT\}\/bin\/qa\.ts \*\)/);
 });
 
 test('body passes the session id and uses the attribution descriptions', () => {
-  const { body } = split(read('SKILL.md'));
+  const { body } = split(read(TEST_SKILL));
   assert.ok(body.includes('${CLAUDE_SESSION_ID}'));
   assert.ok(body.includes('QA takeover <id>'));
   assert.ok(body.includes('QA judge <id>'));
@@ -32,7 +34,7 @@ test('body passes the session id and uses the attribution descriptions', () => {
 
 test('every qa command the skill and briefs use exists in the CLI', () => {
   const used = new Set<string>();
-  for (const f of ['SKILL.md', 'reference/takeover.md', 'reference/judge.md', 'reference/intake.md']) {
+  for (const f of [TEST_SKILL, SETUP_SKILL, 'reference/takeover.md', 'reference/judge.md', 'reference/intake.md']) {
     for (const m of read(f).matchAll(/qa\.ts ([a-z][a-z-]*)/g)) used.add(m[1]);
     for (const m of read(f).matchAll(/\{\{QA\}\} ([a-z][a-z-]*)/g)) used.add(m[1]);
   }
@@ -44,8 +46,8 @@ test('the judge brief never mentions how the steps were executed', () => {
   assert.doesNotMatch(read('reference/judge.md'), /jev|takeover|action log/i);
 });
 
-test('SKILL.md body stays short', () => {
-  assert.ok(split(read('SKILL.md')).body.split('\n').length < 120);
+test('test skill body stays short', () => {
+  assert.ok(split(read(TEST_SKILL)).body.split('\n').length < 120);
 });
 
 test('judge brief: login walls and blank pages are unclear, not failures (I6)', () => {
@@ -61,9 +63,9 @@ test('takeover brief covers side effects and the risky/host hand-backs (I10)', (
   assert.match(t, /left_allowed_hosts/);
 });
 
-test('SKILL.md says what to do on runner errors (I12)', () => {
-  const { body } = split(read('SKILL.md'));
-  assert.match(body, /prints `\{"error"/);
+test('test skill says what to do on runner errors (I12)', () => {
+  const { body } = split(read(TEST_SKILL));
+  assert.ok(body.includes('{"error"'));
   assert.match(body, /already active/);
   assert.match(body, /including the current one/);
 });
@@ -72,16 +74,39 @@ test('judge brief: text evidence is only the copied words', () => {
   assert.match(read('reference/judge.md'), /only the exact words/i);
 });
 
-test('SKILL.md covers chrome mode: Allow click, signed-in text to TypeSafe, real accounts', () => {
-  const { body } = split(read('SKILL.md'));
+test('test skill reminds about Allow; the privacy note moved to setup', () => {
+  const { body } = split(read(TEST_SKILL));
   assert.match(body, /Allow/);
-  assert.match(body, /signed-in pages/);
-  assert.match(body, /real accounts/);
+  assert.doesNotMatch(body, /signed-in pages/);
+  assert.doesNotMatch(body, /real accounts/);
+});
+
+test('test skill continues paused runs, reopens a stopped run and skips tests', () => {
+  const { body } = split(read(TEST_SKILL));
+  for (const c of ['qa.ts remaining', 'qa.ts reopen', 'qa.ts skip']) assert.ok(body.includes(c), c);
+});
+
+test('marketplace and plugin manifests name qa-no-qa and visual-qa, and the source points at ./visual-qa', () => {
+  const market = JSON.parse(read('../.claude-plugin/marketplace.json'));
+  assert.equal(market.name, 'qa-no-qa');
+  assert.equal(market.plugins.length, 1);
+  assert.equal(market.plugins[0].name, 'visual-qa');
+  assert.equal(market.plugins[0].source, './visual-qa');
+  const plugin = JSON.parse(read('.claude-plugin/plugin.json'));
+  assert.equal(plugin.name, 'visual-qa');
+  assert.equal(plugin.description, market.plugins[0].description);
+  assert.ok(!('version' in plugin));
+});
+
+test('setup skill never asks for the key in chat', () => {
+  const { front, body } = split(read(SETUP_SKILL));
+  assert.equal(front.name, 'setup');
+  assert.match(body, /never ask for the key in chat/i);
 });
 
 test('chrome-mode wording: sign-in advice, connection errors, tabs come to the front', () => {
   assert.match(read('reference/takeover.md'), /sign in to the site in your Chrome/);
-  const { body } = split(read('SKILL.md'));
+  const { body } = split(read(TEST_SKILL));
   assert.match(body, /did not allow the connection/);
   assert.match(body, /come to the front/);
   assert.doesNotMatch(body, /110 s/);

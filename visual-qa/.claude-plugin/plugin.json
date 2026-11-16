@@ -1,0 +1,5 @@
+{
+  "name": "visual-qa",
+  "description": "Paste a QA checklist; it's tested in your own Chrome and you get an HTML report with screenshots.",
+  "author": { "name": "dontdothatapp" }
+}

@@ -16,6 +16,7 @@ The person pastes whatever checklist they have. Turn it into `~/QA/scenarios/<to
 - **Conditions no page shows** (a setting in an admin tool, a record you cannot find) are not `relies_on`. They become questions (section 4), or a link from the person that settles them. When a link settles a condition, make that link the scenario's `start`, do not search for another page, and add a `relies_on` item naming something visible on that page that identifies the record (its title or ID).
 - **Vague expectations** get a concrete, checkable reading, without asking. That is your call, not a question; the report shows it. The judge sees only the final page, so split two-moment checks: "can save" becomes steps that fill the form, `Click "Save"` and reload the page; `relies_on` has "A save confirmation shows" with `after_step` set to the Save step; `expected` is only what the reloaded page shows ("the saved values are still in the fields").
 - **Logged-out checks** get `logged_out: true`. They need no group switch: when `groups` is defined, still give each one a `group`, the one whose other checks run nearest.
+- **YAML style.** Write every list item in block style (`- what: ...` with `after_step: 1` on the next line), never `{...}`: a comma inside `{...}` silently cuts the text.
 
 ## 3. Groups
 
@@ -54,8 +55,10 @@ topic: PBSA fields
 base_url: https://stage3.env.housinganywhere.dev
 notes: "PBSA advertiser IDs: e2f754ed-…, 3b7777a7-…"
 groups:
-  - {id: g1, needs: Turn the feature flag ON and sign in as the tenant you are using now}
-  - {id: g2, needs: Turn the feature flag ON and sign in as a landlord with a Not Paid and a Paid conversation}
+  - id: g1
+    needs: Turn the feature flag ON and sign in as the tenant you are using now
+  - id: g2
+    needs: Turn the feature flag ON and sign in as a landlord with a Not Paid and a Paid conversation
 scenarios:
   - id: APPLY-FR
     group: g1
@@ -63,10 +66,13 @@ scenarios:
     source: "☐ French listing → address + employment show"
     start: /room/pbsa-paris-example
     steps:
+      - Check that the listing page is shown, with the listing title visible
       - Open the apply form; do not submit it
     relies_on:
-      - {what: The listing is titled "Studio near Sorbonne, Paris", after_step: 1}
-      - {what: The listing's address is in France, after_step: 1}
+      - what: The listing is titled "Studio near Sorbonne, Paris"
+        after_step: 1
+      - what: The listing's address is in France
+        after_step: 1
     expected: The apply form shows address fields and employment fields
 ```
 

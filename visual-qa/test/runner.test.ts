@@ -15,7 +15,7 @@ const fx = useBrowserAndFixtures();
 const FAST = { navTimeoutMs: 3000, actionTimeoutMs: 3000, settleMs: 50 };
 
 function scenario(p: Partial<Scenario>): Scenario {
-  return { id: 'S1', title: 't', start: '/index.html', steps: ['step'], values: {}, expected: 'e', group: null, source: null, reliesOn: [], loggedOut: true, ...p };
+  return { id: 'S1', title: 't', start: '/index.html', steps: ['step'], values: {}, expected: 'e', group: null, source: null, reliesOn: [], loggedOut: true, ...p }; // loggedOut: these tests drive a fresh context in the fixture Chromium
 }
 
 function suiteFor(s: Scenario, allowHosts?: string[]): Suite {

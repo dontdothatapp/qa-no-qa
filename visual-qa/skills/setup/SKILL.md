@@ -29,7 +29,7 @@ Stop and tell the person plainly what is still wrong when a command fails (it pr
 
 Items:
 - **packages** → run `next.command` (it runs `npm ci --omit=dev` in `${CLAUDE_PLUGIN_ROOT}`; about a minute, so give it a long timeout), then re-check.
-- **typesafe_key** with `next.command` set → run `node ${CLAUDE_PLUGIN_ROOT}/bin/setup.ts --open-key-file`. It opens TypeSafe's key page in their browser and the key file in TextEdit. Say: "Copy your key from the TypeSafe page, paste it after `TYPESAFE_API_KEY=` in the TextEdit window, save, and tell me when done."
+- **typesafe_key** with `next.command` set → run `node ${CLAUDE_PLUGIN_ROOT}/bin/setup.ts --open-key-file`. It opens TypeSafe's key page in their browser and the key file in TextEdit. Say: "Copy your key from the TypeSafe page, paste it right after `TYPESAFE_API_KEY=`, on the same line, in the TextEdit window, save, and tell me when done."
   - `next.command` is null → TypeSafe couldn't be reached just now. Tell them to check their internet connection and run setup again later, and stop.
   - Never ask for the key in chat, and never read or print the key file yourself; only `--open-key-file` opens it, for them.
   - If they paste the key into chat anyway, do not repeat it back. Ask them to put it in the file instead.

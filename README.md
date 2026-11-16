@@ -9,13 +9,17 @@ You need a Mac, Claude Code, Google Chrome 144 or newer, and a TypeSafe account 
 
 Paste this into Claude Code:
 
-> Install Visual QA: if Node.js 22.18 or newer isn't installed, install it. Then run `claude plugin marketplace add dontdothatapp/qa-no-qa` and `claude plugin install visual-qa@qa-no-qa`, and tell me to type /reload-plugins and then /visual-qa:setup.
+````text
+Install Visual QA: if Node.js 22.18 or newer isn't installed, install it. Then run `claude plugin marketplace add dontdothatapp/qa-no-qa` and `claude plugin install visual-qa@qa-no-qa`, and tell me to type /reload-plugins and then /visual-qa:setup.
+````
+
+If Claude says the `claude` command isn't found (e.g. in the desktop app), type `/plugin marketplace add dontdothatapp/qa-no-qa` and then `/plugin install visual-qa@qa-no-qa` yourself, then continue with `/reload-plugins`.
 
 Claude runs the install. If your Mac needs Node.js and Claude can't install it for you, it asks you to run the installer from nodejs.org (it may ask for your Mac password). Then:
 
 1. Type `/reload-plugins` (or restart Claude Code).
 2. Type `/visual-qa:setup`. It checks what's missing and walks you through it, one thing at a time. You'll do two things yourself:
-   - **Add your TypeSafe key.** Your TypeSafe key page opens in the browser, and a small key file opens in TextEdit. Copy the key, paste it after `TYPESAFE_API_KEY=`, save, and tell Claude you're done. Never paste the key into the chat.
+   - **Add your TypeSafe key.** Your TypeSafe key page opens in the browser, and a small key file opens in TextEdit. Copy the key, paste it right after `TYPESAFE_API_KEY=`, on the same line, save, and tell Claude you're done. Never paste the key into the chat.
    - **Switch on remote debugging in Chrome.** A Chrome page opens with a remote-debugging switch near the top. Switch it on. This lets tests open tabs in your Chrome. You only do this once.
 
 You can run `/visual-qa:setup` again any time. To get updates automatically: type `/plugin`, open Marketplaces, choose qa-no-qa and turn on auto-update.

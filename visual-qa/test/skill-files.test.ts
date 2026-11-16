@@ -193,3 +193,36 @@ test('briefs: relies_on_only gives empty keyPoints, takeover has Background, int
   assert.match(i, /never ask what a page shows/i);
   assert.match(i, /make that link the scenario's `start`/i);
 });
+
+test("group loop: a skipped test moves on, pauses count only tests that will run, and an all-won't-test group doesn't pause", () => {
+  const groups = section(split(read(TEST_SKILL)).body, '## 5.');
+  assert.match(groups, /`"status":"skipped"` → next test/);
+  assert.match(groups, /N counts only the tests that will run/);
+  assert.match(groups, /only won't-test checks[^\n]*no pause/i);
+});
+
+test('intake uses the checklist from the message when $ARGUMENTS is empty or a summary, and saves their own words', () => {
+  const intake = section(split(read(TEST_SKILL)).body, '## 3. Intake');
+  assert.doesNotMatch(intake, /Nothing was pasted → ask/);
+  assert.match(intake, /`\$ARGUMENTS` is empty or a summary/);
+  assert.match(intake, /ask only if there is none/);
+  assert.match(intake, /verbatim, not a paraphrase/);
+});
+
+test('scenario format: notes go to takeovers, not the report', () => {
+  const line = read('reference/scenario-format.md').split('\n').find((l) => l.startsWith('notes:'))!;
+  assert.doesNotMatch(line, /shown in the report/);
+  assert.match(line, /takes? over/);
+});
+
+test('key wording: paste right after TYPESAFE_API_KEY=, on the same line (setup skill and README)', () => {
+  assert.match(split(read(SETUP_SKILL)).body, /right after `TYPESAFE_API_KEY=`, on the same line/);
+  assert.match(read('../README.md'), /right after `TYPESAFE_API_KEY=`, on the same line/);
+});
+
+test('README: the install line is in a four-backtick text copy box, verbatim, with the slash-command fallback under it', () => {
+  const readme = read('../README.md');
+  const line = "Install Visual QA: if Node.js 22.18 or newer isn't installed, install it. Then run `claude plugin marketplace add dontdothatapp/qa-no-qa` and `claude plugin install visual-qa@qa-no-qa`, and tell me to type /reload-plugins and then /visual-qa:setup.";
+  assert.ok(readme.includes(`\`\`\`\`text\n${line}\n\`\`\`\`\n`), 'copy box');
+  assert.ok(readme.includes("If Claude says the `claude` command isn't found (e.g. in the desktop app), type `/plugin marketplace add dontdothatapp/qa-no-qa` and then `/plugin install visual-qa@qa-no-qa` yourself, then continue with `/reload-plugins`."));
+});

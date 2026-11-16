@@ -85,7 +85,7 @@ export async function runSetupChecks(d: SetupDeps): Promise<{ ok: boolean; items
     keyItem = {
       name: 'typesafe_key', level: 'error', ok: false,
       detail: 'no TypeSafe key found',
-      fix: `Paste your TypeSafe key after "TYPESAFE_API_KEY=" in the file that opens, save it, then run setup again. Get a key at ${TYPESAFE_KEY_URL}`,
+      fix: `In the file that opens, paste your TypeSafe key right after TYPESAFE_API_KEY=, on the same line, save it, then run setup again. Get a key at ${TYPESAFE_KEY_URL}`,
       command: cmd('--open-key-file'),
     };
   } else if (!havePackages) {
@@ -100,7 +100,7 @@ export async function runSetupChecks(d: SetupDeps): Promise<{ ok: boolean; items
         name: 'typesafe_key', level: 'error', ok: false,
         detail: `found (${key.source}) but Jev could not be reached: ${kind} error`,
         fix: kind === 'fatal'
-          ? `TypeSafe did not accept the key. Paste a fresh key in the file that opens (get one at ${TYPESAFE_KEY_URL}), save it, then run setup again.`
+          ? `TypeSafe did not accept the key. In the file that opens, replace it with a fresh key (get one at ${TYPESAFE_KEY_URL}), pasted right after TYPESAFE_API_KEY=, on the same line, save it, then run setup again.`
           : 'Jev could not be reached just now. Check your internet connection and run setup again.',
         command: kind === 'fatal' ? cmd('--open-key-file') : null,
       };
@@ -141,17 +141,22 @@ export async function runSetupChecks(d: SetupDeps): Promise<{ ok: boolean; items
 
 const KEY_LINE = /^\s*(?:export\s+)?TYPESAFE_API_KEY\s*=/m;
 
-/** Makes sure the file has a `TYPESAFE_API_KEY=` line (mode 600) without touching any other line. */
+/**
+ * Makes sure the file has a `TYPESAFE_API_KEY=` line (mode 600) without touching any other line.
+ * A new file gets the line without a newline, so a key pasted at the end lands on it, not on an empty next line.
+ */
 export function ensureKeyFile(file: string): { created: boolean } {
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  let text = '';
+  let text: string | null = null;
   try {
     text = fs.readFileSync(file, 'utf8');
   } catch {
     // new file
   }
-  const has = KEY_LINE.test(text);
-  if (!has) {
+  const has = text !== null && KEY_LINE.test(text);
+  if (text === null) {
+    fs.writeFileSync(file, 'TYPESAFE_API_KEY=', { mode: 0o600 });
+  } else if (!has) {
     const sep = text === '' || text.endsWith('\n') ? '' : '\n';
     fs.appendFileSync(file, `${sep}TYPESAFE_API_KEY=\n`, { mode: 0o600 });
   }

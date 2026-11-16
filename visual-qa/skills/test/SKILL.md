@@ -36,8 +36,8 @@ Only when the person asks to continue (or the input is `continue`):
 ## 3. Intake
 
 - The input is a path to a `.yaml`/`.yml` file → Read it (takeovers need its YAML blocks and `notes`) and go to step 4.
-- Nothing was pasted → ask them to paste their checklist.
-- Otherwise Read `${CLAUDE_PLUGIN_ROOT}/reference/intake.md` and follow it. It says what to ask (all in one numbered message, only if needed) and which files to write.
+- Otherwise the checklist is the person's own text: if `$ARGUMENTS` is empty or a summary (e.g. you were started without the slash command), use the checklist in their message; ask only if there is none.
+- Read `${CLAUDE_PLUGIN_ROOT}/reference/intake.md` and follow it. It says what to ask (all in one numbered message, only if needed) and which files to write. Save their text as they wrote it (verbatim, not a paraphrase or a summary).
 - Then send one line: `Running N checks in M groups. First group: <needs>.` (a single group: `Running N checks.`), plus the "won't test: …" lines unless your questions message already listed them.
 
 ## 4. Start
@@ -53,13 +53,14 @@ Start errors:
 
 ## 5. Each group, in order
 
-1. **Pause** before every group except the first (in a continued run, before the first too):
+1. **Pause** before every group except the first (in a continued run, before the first too). A group of only won't-test checks (already skipped) gets no pause: go on to the next group.
    - Judge the tests finished so far (step 6), then run `qa.ts report` (skip both if none has finished).
-   - Send: `Next N checks: <needs, as an instruction>. Say go when ready, or skip.`, with the report so far as a link if there is one. Wait.
-   - skip → `qa.ts skip <id> --reason "skipped at the pause"` for each test in the group; go to the next group.
+   - Send: `Next N checks: <needs, as an instruction>. Say go when ready, or skip.`, with the report so far as a link if there is one. N counts only the tests that will run, not won't-test checks. Wait.
+   - skip → `qa.ts skip <id> --reason "skipped at the pause"` for each test in the group not already skipped; go to the next group.
    - stop, or "that's enough" → step 7.
 2. For each test id in the group: `qa.ts run <id>`.
    - `"status":"completed"` → next test.
+   - `"status":"skipped"` → next test (a won't-test check).
    - `"status":"gave_up"` → the runner ended it (e.g. the site's bot protection refused; the reason is in `gaveUp`) → next test. Do not retry.
    - `"status":"handback"` with `"reason":"jev_unavailable"` → ask: the fast navigator isn't available; should Claude do the remaining checks itself (slower), or stop?
      - Stop → for every test not finished, including the current one: `qa.ts giveup <id> --class tooling_or_environment --reason "Jev unavailable"`, then step 7.

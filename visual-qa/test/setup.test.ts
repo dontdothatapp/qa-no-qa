@@ -6,6 +6,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { readChromeMajor, ensureKeyFile, runSetupChecks, PRIVACY_NOTE, UPDATES_NOTE, TYPESAFE_KEY_URL, type SetupDeps } from '../src/setup.ts';
+import { findTypeSafeKey } from '../src/config.ts';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
@@ -148,12 +149,22 @@ test('ensureKeyFile adds the key line to a file without one, keeping the other l
   assert.equal(fs.readFileSync(file, 'utf8'), 'FOO=1\nTYPESAFE_API_KEY=\n');
 });
 
-test('ensureKeyFile creates the file with mode 600 and an empty key line', () => {
-  const file = path.join(tmp(), 'nested', '.env');
+test('ensureKeyFile creates the file with mode 600 and the key line without a newline, so a paste lands on that line', () => {
+  const home = tmp();
+  const file = path.join(home, '.visual-qa', '.env');
   const r = ensureKeyFile(file);
   assert.equal(r.created, true);
-  assert.equal(fs.readFileSync(file, 'utf8'), 'TYPESAFE_API_KEY=\n');
+  assert.equal(fs.readFileSync(file, 'utf8'), 'TYPESAFE_API_KEY=');
   assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+  fs.appendFileSync(file, 'sk-pasted\n'); // the person pastes at the end of the file and saves
+  assert.deepEqual(findTypeSafeKey({ HOME: home }), { key: 'sk-pasted', source: 'home' });
+});
+
+test('the key fix says to paste right after TYPESAFE_API_KEY=, on the same line', async () => {
+  const missing = await runSetupChecks(deps({ env: { HOME: '/nonexistent' } }));
+  assert.match(missing.next?.fix ?? '', /right after TYPESAFE_API_KEY=, on the same line/);
+  const rejected = await runSetupChecks(deps({ pingJev: async () => { throw Object.assign(new Error('bad key'), { kind: 'fatal' }); } }));
+  assert.match(rejected.next?.fix ?? '', /right after TYPESAFE_API_KEY=, on the same line/);
 });
 
 test('notes and URL are the agreed text', () => {

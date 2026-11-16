@@ -8,7 +8,7 @@ base_url: https://staging.example.com   # required; scenario `start` paths are r
 viewport: {width: 1280, height: 800}    # optional (default shown)
 allow_hosts: [staging.example.com]      # optional (default: the base_url host); leaving them hands back to Claude
 judge_model: sonnet                     # optional: sonnet | haiku | opus
-notes: "Test IDs: 123, 456"             # optional: free text from the checklist, shown in the report
+notes: "Test IDs: 123, 456"             # optional: background from the checklist; given to Claude when it takes over a test (not to the judge)
 groups:                                 # optional: batches that need the same setup, run one after another
   - id: flag-on
     needs: Feature flag ON

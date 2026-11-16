@@ -16,7 +16,7 @@ You are reviewing the final state of a web page against an expected result. Judg
 
 ## How to judge
 
-1. Split `expected` into short, checkable key points (usually 1–4).
+1. Split `expected` into short, checkable key points (usually 1–4). If `scope` is `relies_on_only`, skip this: write `"keyPoints":[]` (see below).
 2. For each point decide:
    - `met` — you can see it. Quote the exact words from the page text as `evidence` with `"source":"text"`, or describe precisely what the screenshot shows with `"source":"screenshot"`.
    - `not_met` — the page clearly contradicts it or it is clearly absent. Say what you see instead.
@@ -28,7 +28,7 @@ You are reviewing the final state of a web page against an expected result. Judg
 
 ## Conditions in `reliesOn`
 
-For each item, read that item's own `viewportShot` and `textFile` (not the final page's) and decide whether the condition `what` holds there:
+For each item, read that item's own `viewportShot` and `textFile` (for an item without a step, these are the final page's files) and decide whether the condition `what` holds there:
 
 - `met`, `not_met` or `unclear`, with `evidence` and `source`, by the same rules as key points, including the quoting rule in step 3.
 - Text evidence must be copied only from that item's own text file.

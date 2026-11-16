@@ -27,7 +27,7 @@ Hand-back from the runner (where it stopped and why):
 
 ## Rules
 
-1. Unblock the current step, then `step-done`, then `resume`. If the hand-back reason is `jev_unavailable`, never `resume`: do every remaining step yourself, calling `step-done` after each.
+1. Unblock the current step, then check that the page meets any `relies_on` condition for that step (the checkpoint is captured at `step-done`); if no page can be found that meets it, give up as `no_matching_page`. Then `step-done`, then `resume`. If the hand-back reason is `jev_unavailable`, never `resume`: do every remaining step yourself, calling `step-done` after each.
 2. Budget: at most 25 `act` calls for this scenario. When the runner says the budget is exceeded, give up as `tooling_or_environment`.
 3. Never type passwords, one-time codes or payment details; leave password fields empty (the runner refuses to fill them). If the site requires one to continue, give up as `tooling_or_environment` with "sign-in needed". A login wall means the user is not signed in: `giveup --class tooling_or_environment --reason "not signed in — sign in to the site in your Chrome"`.
 4. Missing values (`needs_text`): fill unspecified fields with obviously fake test data — e.g. `Test User`, `1 Test Street`, `qa+<id>@example.com`, `+1 555 0100` — and add `--made-up` to that `act type` command so the value is recorded. Use the scenario's `values` when it has them. Never invent passwords, payment or real personal data.

@@ -32,7 +32,7 @@ test('body passes the session id and uses the attribution descriptions', () => {
 
 test('every qa command the skill and briefs use exists in the CLI', () => {
   const used = new Set<string>();
-  for (const f of ['SKILL.md', 'reference/takeover.md', 'reference/judge.md']) {
+  for (const f of ['SKILL.md', 'reference/takeover.md', 'reference/judge.md', 'reference/intake.md']) {
     for (const m of read(f).matchAll(/qa\.ts ([a-z][a-z-]*)/g)) used.add(m[1]);
     for (const m of read(f).matchAll(/\{\{QA\}\} ([a-z][a-z-]*)/g)) used.add(m[1]);
   }
@@ -106,4 +106,13 @@ test('takeover brief: has {{NOTES}}, no_matching_page, and no qa login', () => {
   assert.match(t, /\{\{NOTES\}\}/);
   assert.match(t, /no_matching_page/);
   assert.doesNotMatch(t, /qa login/);
+});
+
+test('briefs: relies_on_only gives empty keyPoints, takeover has Background, intake numbers questions and forbids asking what pages show', () => {
+  assert.match(read('reference/judge.md'), /relies_on_only[^\n]*keyPoints":\[\]|keyPoints":\[\][^\n]*relies_on_only/);
+  assert.match(read('reference/takeover.md'), /## Background/);
+  const i = read('reference/intake.md');
+  assert.match(i, /numbered/i);
+  assert.match(i, /never ask what a page shows/i);
+  assert.match(i, /make that link the scenario's `start`/i);
 });

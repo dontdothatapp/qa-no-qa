@@ -2,7 +2,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parse } from 'yaml';
 import { DEFAULTS } from './config.ts';
-import type { BrowserMode, Scenario, Suite, Viewport } from './types.ts';
+import type { Group, RelyItem, Scenario, Suite, Viewport } from './types.ts';
+
+const BROWSER_GONE = 'no longer supported — tests always run in your Chrome (use logged_out: true for signed-out tests)';
+const SESSION_GONE = 'no longer supported — tests use your Chrome sign-ins (use logged_out: true for signed-out tests)';
 
 export class SuiteError extends Error {
   problems: string[];
@@ -63,15 +66,28 @@ export function loadSuite(file: string): Suite {
     }
   }
 
-  const browserRaw = str(doc.browser) ?? 'chrome';
-  if (browserRaw !== 'chrome' && browserRaw !== 'isolated') problems.push('browser: must be chrome or isolated');
-  const browser = (browserRaw === 'isolated' ? 'isolated' : 'chrome') as BrowserMode;
-  const SESSION_NAME = /^[A-Za-z0-9_-]+$/;
-  const fileSession = str(doc.session);
-  const LOGGED_OUT_IN_CHROME = 'session: none (logged out) cannot run in chrome mode — use browser: isolated for logged-out scenarios';
-  if (browser === 'chrome' && fileSession?.toLowerCase() === 'none') problems.push(LOGGED_OUT_IN_CHROME);
-  if (fileSession && fileSession.toLowerCase() !== 'none' && !SESSION_NAME.test(fileSession)) {
-    problems.push('session: name may only contain letters, digits, - and _');
+  if (doc.browser !== undefined) problems.push(`browser: ${BROWSER_GONE}`);
+  if (doc.session !== undefined) problems.push(`session: ${SESSION_GONE}`);
+  const notes = str(doc.notes);
+
+  const groups: Group[] = [];
+  if (doc.groups !== undefined) {
+    if (!Array.isArray(doc.groups)) {
+      problems.push('groups: must be a list of {id, needs}');
+    } else {
+      doc.groups.forEach((g: unknown, i: number) => {
+        if (!isObject(g)) {
+          problems.push(`groups[${i}]: must be a mapping`);
+          return;
+        }
+        const gid = str(g.id);
+        const needs = str(g.needs);
+        if (!gid) problems.push(`groups[${i}]: missing "id"`);
+        else if (groups.some((x) => x.id === gid)) problems.push(`groups[${i}]: duplicate id "${gid}"`);
+        if (!needs) problems.push(`groups[${i}]: missing "needs"`);
+        if (gid) groups.push({ id: gid, needs: needs ?? '' });
+      });
+    }
   }
   const judgeModel = str(doc.judge_model) ?? 'sonnet';
   if (!/^(sonnet|haiku|opus|inherit|claude-[a-z0-9.-]+)$/.test(judgeModel)) {
@@ -121,20 +137,60 @@ export function loadSuite(file: string): Suite {
         }
       }
 
-      const ownSession = raw.session === undefined ? fileSession : str(raw.session);
-      // in chrome mode every tab carries the user's sign-ins, so "logged out" would silently be false
-      if (browser === 'chrome' && raw.session !== undefined && ownSession?.toLowerCase() === 'none') problems.push(`${id}: ${LOGGED_OUT_IN_CHROME}`);
-      const session = ownSession && ownSession.toLowerCase() !== 'none' ? ownSession : null;
-      if (raw.session !== undefined && session && !SESSION_NAME.test(session)) problems.push(`${id}: session name may only contain letters, digits, - and _`);
+      if (raw.session !== undefined) problems.push(`${id}: session: ${SESSION_GONE}`);
+      if (raw.browser !== undefined) problems.push(`${id}: browser: ${BROWSER_GONE}`);
+
+      let group: string | null = null;
+      if (groups.length > 0) {
+        group = str(raw.group);
+        if (!group) problems.push(`${id}: missing "group" (every scenario needs one when groups are defined)`);
+        else if (!groups.some((g) => g.id === group)) problems.push(`${id}: group "${group}" is not defined in groups`);
+      } else if (raw.group !== undefined) {
+        group = str(raw.group);
+        problems.push(`${id}: group "${group}" is not defined in groups`);
+      }
+
+      const reliesOn: RelyItem[] = [];
+      if (raw.relies_on !== undefined) {
+        if (!Array.isArray(raw.relies_on)) {
+          problems.push(`${id}: relies_on must be a list`);
+        } else {
+          raw.relies_on.forEach((r: unknown, j: number) => {
+            if (!isObject(r)) {
+              problems.push(`${id}: relies_on[${j}] must be a mapping`);
+              return;
+            }
+            const what = str(r.what);
+            if (!what) problems.push(`${id}: relies_on[${j}]: missing "what"`);
+            let afterStep: number | null = null;
+            if (r.after_step !== undefined && r.after_step !== null) {
+              const n = r.after_step;
+              const max = steps?.length ?? 0;
+              if (typeof n === 'number' && Number.isInteger(n) && n >= 1 && n <= max) afterStep = n;
+              else problems.push(`${id}: relies_on[${j}].after_step must be a step number from 1 to ${max}`);
+            }
+            if (what) reliesOn.push({ what, afterStep });
+          });
+        }
+      }
+
+      let loggedOut = false;
+      if (raw.logged_out !== undefined) {
+        if (typeof raw.logged_out === 'boolean') loggedOut = raw.logged_out;
+        else problems.push(`${id}: logged_out must be true or false`);
+      }
 
       scenarios.push({
         id,
         title: title ?? '',
-        session,
         start: start ?? '/',
         steps: (steps ?? []).filter((s): s is string => s !== null),
         values,
         expected: expected ?? '',
+        group,
+        source: str(raw.source),
+        reliesOn,
+        loggedOut,
       });
     });
   }
@@ -142,11 +198,12 @@ export function loadSuite(file: string): Suite {
   if (problems.length) throw new SuiteError(problems);
   return {
     topic: topic as string,
-    browser,
     baseUrl: (baseUrl as URL).href,
     viewport,
     allowHosts,
     judgeModel,
+    notes,
+    groups,
     scenarios,
     sourcePath: path.resolve(file),
   };
@@ -154,4 +211,13 @@ export function loadSuite(file: string): Suite {
 
 export function resolveStartUrl(suite: Suite, s: Scenario): string {
   return new URL(s.start, suite.baseUrl).href;
+}
+
+export function groupOrder(suite: Suite): Array<{ id: string; needs: string | null; scenarios: string[] }> {
+  if (suite.groups.length === 0) return [{ id: 'default', needs: null, scenarios: suite.scenarios.map((s) => s.id) }];
+  return suite.groups.map((g) => ({
+    id: g.id,
+    needs: g.needs,
+    scenarios: suite.scenarios.filter((s) => s.group === g.id).map((s) => s.id),
+  }));
 }

@@ -86,3 +86,24 @@ test('chrome-mode wording: sign-in advice, connection errors, tabs come to the f
   assert.match(body, /come to the front/);
   assert.doesNotMatch(body, /110 s/);
 });
+
+test("intake brief: one message for all questions, relies_on with after_step, source verbatim, groups as instructions, won't test, file paths", () => {
+  const i = read('reference/intake.md');
+  for (const re of [/one message/i, /relies_on/, /after_step/, /verbatim/i, /won't test/i, /~\/QA\/scenarios\/<topic>\.yaml/, /\.checklist\.txt/, /logged_out: true/]) {
+    assert.match(i, re);
+  }
+});
+
+test('judge brief: judges reliesOn with the same quoting rule and supports relies_on_only', () => {
+  const j = read('reference/judge.md');
+  assert.match(j, /reliesOn/);
+  assert.match(j, /relies_on_only/);
+  assert.match(j, /copy .*what.* exactly/i);
+});
+
+test('takeover brief: has {{NOTES}}, no_matching_page, and no qa login', () => {
+  const t = read('reference/takeover.md');
+  assert.match(t, /\{\{NOTES\}\}/);
+  assert.match(t, /no_matching_page/);
+  assert.doesNotMatch(t, /qa login/);
+});

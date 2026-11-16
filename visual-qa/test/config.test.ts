@@ -14,32 +14,24 @@ function writeEnv(dir: string, content: string): void {
   fs.writeFileSync(path.join(dir, '.visual-qa', '.env'), content);
 }
 
-test('key from env wins over files', () => {
-  const project = tempDir();
-  writeEnv(project, 'TYPESAFE_API_KEY=from-project\n');
-  const found = findTypeSafeKey({ TYPESAFE_API_KEY: 'k1', VISUAL_QA_PROJECT_ROOT: project, HOME: tempDir() });
+test('key from env wins over the home file', () => {
+  const home = tempDir();
+  writeEnv(home, 'TYPESAFE_API_KEY=from-home\n');
+  const found = findTypeSafeKey({ TYPESAFE_API_KEY: 'k1', HOME: home });
   assert.equal(found?.source, 'env');
   assert.equal(found?.key, 'k1');
 });
 
-test('key from project .env when env is empty', () => {
-  const project = tempDir();
-  writeEnv(project, '# comment\nOTHER=x\nTYPESAFE_API_KEY="from-project"\n');
-  const found = findTypeSafeKey({ VISUAL_QA_PROJECT_ROOT: project, HOME: tempDir() });
-  assert.equal(found?.source, 'project');
-  assert.equal(found?.key, 'from-project');
-});
-
-test('key from home .env when project has none', () => {
+test('key from home .env when env is empty (comments and quotes handled)', () => {
   const home = tempDir();
-  writeEnv(home, "TYPESAFE_API_KEY='from-home'\n");
-  const found = findTypeSafeKey({ VISUAL_QA_PROJECT_ROOT: tempDir(), HOME: home });
+  writeEnv(home, "# comment\nOTHER=x\nTYPESAFE_API_KEY='from-home'\n");
+  const found = findTypeSafeKey({ HOME: home });
   assert.equal(found?.source, 'home');
   assert.equal(found?.key, 'from-home');
 });
 
 test('no key anywhere → null', () => {
-  assert.equal(findTypeSafeKey({ VISUAL_QA_PROJECT_ROOT: tempDir(), HOME: tempDir() }), null);
+  assert.equal(findTypeSafeKey({ HOME: tempDir() }), null);
 });
 
 test('runFolderName uses date + sanitized topic', () => {

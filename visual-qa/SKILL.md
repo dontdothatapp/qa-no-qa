@@ -15,10 +15,9 @@ Runner command prefix used below: `node ${CLAUDE_SKILL_DIR}/bin/qa.ts`
 
 ## 1. Preflight
 
-Run `node ${CLAUDE_SKILL_DIR}/bin/qa.ts doctor`.
-- Any failed check with `"level":"error"` → stop and tell the user the check's `detail` (it says how to fix it).
+Run `node ${CLAUDE_SKILL_DIR}/bin/setup.ts --check`.
+- `ok` is false → stop and tell the user `next.fix` (it says what to do); if `next.command` is set, run it.
 - `anthropic_api_key` warning → tell the user that Claude Code may be billing the API instead of their subscription (they can check with `/status`) and ask whether to continue. Wait for the answer.
-- `chrome_remote_debugging` warning → only matters if the scenario file runs in Chrome (the default, `browser: chrome`): tell the user to switch it on at `chrome://inspect/#remote-debugging`, or use `browser: isolated`.
 - Mention once, in one or two lines: page text is sent to TypeSafe (Jev's provider) while scenarios run — in Chrome mode that includes text from the user's signed-in pages — and Chrome-mode tests act in the user's real accounts.
 
 ## 2. Scenarios

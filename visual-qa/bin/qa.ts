@@ -16,11 +16,8 @@ import { createScriptedClient, createTypeSafeClient, JevError, type JevAnswer, t
 import { groupOrder, loadSuite, SuiteError } from '../src/scenarios.ts';
 import { findLatestUnfinishedRun } from '../src/runs.ts';
 import { outputRoot } from '../src/config.ts';
-import { runDoctor } from '../src/doctor.ts';
-import { chromium } from 'playwright';
-import { TypeSafeClient, noul } from '@typesafe-ai/sdk';
 
-export const COMMANDS = ['start', 'daemon', 'run', 'resume', 'look', 'act', 'shot', 'step-done', 'giveup', 'skip', 'reopen', 'remaining', 'evidence', 'report', 'stop', 'doctor'] as const;
+export const COMMANDS = ['start', 'daemon', 'run', 'resume', 'look', 'act', 'shot', 'step-done', 'giveup', 'skip', 'reopen', 'remaining', 'evidence', 'report', 'stop'] as const;
 export type CommandName = (typeof COMMANDS)[number];
 
 const BIN = fs.realpathSync(fileURLToPath(import.meta.url));
@@ -220,21 +217,6 @@ export async function main(argv: string[]): Promise<number> {
           print(writeReport(current.runDir));
         }
         return 0;
-      }
-      case 'doctor': {
-        const r = await runDoctor({
-          env: process.env,
-          nodeVersion: process.version,
-          chromiumPath: () => chromium.executablePath(),
-          fileExists: fs.existsSync,
-          chromeEndpoint: () => findChromeEndpoint(),
-          pingJev: async (key) => {
-            const client = new TypeSafeClient({ apiKey: key, logLevel: 'off', retry: { maxRetries: 0 } } as ConstructorParameters<typeof TypeSafeClient>[0]);
-            await client.systemOne({ state: 'ping', questions: { ok: noul('Is this a test message?') } } as Parameters<TypeSafeClient['systemOne']>[0]);
-          },
-        });
-        print(r);
-        return r.ok ? 0 : 1;
       }
       default:
         print(await sendCommand(name, { id: needId(positionals, `${name} <id>`) }));

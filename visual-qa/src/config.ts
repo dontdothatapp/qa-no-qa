@@ -29,14 +29,9 @@ function homeDir(env: Env): string {
   return env.HOME || os.homedir();
 }
 
-/** Directory of the visual-qa skill source (real path, symlinks resolved). */
-export function skillDir(): string {
+/** Directory of the visual-qa plugin source (real path, symlinks resolved). */
+export function pluginRoot(): string {
   return path.dirname(path.dirname(fs.realpathSync(fileURLToPath(import.meta.url))));
-}
-
-/** The project that contains the visual-qa folder (holds .visual-qa/.env). */
-export function projectRoot(env: Env = process.env): string {
-  return env.VISUAL_QA_PROJECT_ROOT || path.dirname(skillDir());
 }
 
 export function stateDir(env: Env = process.env): string {
@@ -45,6 +40,11 @@ export function stateDir(env: Env = process.env): string {
 
 export function outputRoot(env: Env = process.env): string {
   return env.VISUAL_QA_OUTPUT_DIR || path.join(homeDir(env), 'QA');
+}
+
+/** The file the person pastes their TypeSafe key into. */
+export function keyFile(env: Env = process.env): string {
+  return path.join(homeDir(env), '.visual-qa', '.env');
 }
 
 function readDotEnvValue(file: string, name: string): string | null {
@@ -70,15 +70,13 @@ function readDotEnvValue(file: string, name: string): string | null {
   return null;
 }
 
-export type KeySource = 'env' | 'project' | 'home';
+export type KeySource = 'env' | 'home';
 
 /** Finds the TypeSafe key. Callers must never print `key`; report `source` only. */
 export function findTypeSafeKey(env: Env = process.env): { key: string; source: KeySource } | null {
   const fromEnv = env.TYPESAFE_API_KEY?.trim();
   if (fromEnv) return { key: fromEnv, source: 'env' };
-  const fromProject = readDotEnvValue(path.join(projectRoot(env), '.visual-qa', '.env'), 'TYPESAFE_API_KEY');
-  if (fromProject) return { key: fromProject, source: 'project' };
-  const fromHome = readDotEnvValue(path.join(homeDir(env), '.visual-qa', '.env'), 'TYPESAFE_API_KEY');
+  const fromHome = readDotEnvValue(keyFile(env), 'TYPESAFE_API_KEY');
   if (fromHome) return { key: fromHome, source: 'home' };
   return null;
 }

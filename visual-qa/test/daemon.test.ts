@@ -408,7 +408,7 @@ test('run on a logged_out scenario opens and closes its own context', async () =
   }
 });
 
-async function reliesOnDaemon(answers: Parameters<typeof createScriptedClient>[0]) {
+async function reliesOnDaemon(answers: Parameters<typeof createScriptedClient>[0], prepare: (runDir: string) => void = () => {}) {
   const dir = tmp('daemon-relies');
   const file = path.join(dir, 'suite.yaml');
   fs.writeFileSync(file, `topic: Relies
@@ -432,6 +432,7 @@ scenarios:
 `);
   const env = { ...process.env, VISUAL_QA_OUTPUT_DIR: dir };
   const runDir = createRunFolder(loadSuite(file), 'session-x', new Date(), env);
+  prepare(runDir);
   const d = await startDaemon(runDir, { jev: createScriptedClient(answers), navTimeoutMs: 5000, actionTimeoutMs: 3000, settleMs: 50, env: chromeEnv });
   return { d, runDir };
 }
@@ -482,6 +483,30 @@ test('evidence for an app_problem give-up with a checkpoint is relies_on_only; w
     assert.ok(none.result.reason);
     const run = JSON.parse(fs.readFileSync(path.join(runDir, 'run.json'), 'utf8'));
     assert.deepEqual(run.scenarios.R2.checkpoints, []);
+  } finally {
+    await d.close();
+  }
+});
+
+test('evidence uses the shared due list: a give-up whose checkpoint failed still owes the item; a missing checkpoint gets null files', async () => {
+  const { d } = await reliesOnDaemon([], (runDir) => {
+    const file = path.join(runDir, 'run.json');
+    const run = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const ev = { url: 'u', title: 't', httpStatus: 200, consoleErrors: [], failedRequests: [], textFile: '/r/page-text.txt', viewportShot: '/r/v.jpg', fullPageShot: '/r/f.jpg', errorPhrase: null };
+    // R1: gave up on an app problem after step 1, but the step-1 checkpoint was never captured
+    Object.assign(run.scenarios.R1, { status: 'gave_up', currentStep: 1, gaveUp: { class: 'app_problem', reason: 'broken' }, evidence: ev, checkpoints: [] });
+    // R2: completed, but its step-1 checkpoint was never captured
+    Object.assign(run.scenarios.R2, { status: 'completed', currentStep: 2, evidence: ev, checkpoints: [] });
+    fs.writeFileSync(file, JSON.stringify(run));
+  });
+  try {
+    const gaveUp = (await cmd(d, 'evidence', { id: 'R1' })).body.result;
+    assert.equal(gaveUp.needsJudge, true);
+    assert.equal(gaveUp.scope, 'relies_on_only');
+    assert.deepEqual(gaveUp.reliesOn, [{ what: 'the first page is shown', viewportShot: null, textFile: null }], 'owes the reached item, never the final-page one');
+    const completed = (await cmd(d, 'evidence', { id: 'R2' })).body.result;
+    assert.equal(completed.scope, 'full');
+    assert.deepEqual(completed.reliesOn, [{ what: 'the first page is shown', viewportShot: null, textFile: null }]);
   } finally {
     await d.close();
   }

@@ -254,3 +254,118 @@ test('continuesFrom adds a link to the earlier report', () => {
   const none = checklistRun([{ id: 'A' }], { A: record('skipped', { skipReason: 'r' }) });
   assert.ok(!renderReport(buildReportModel(none, { configDir: TRANSCRIPTS }), fakeImage).includes('Continues'));
 });
+
+// ---- the due list (shared with `qa evidence`): which relies_on items a row owes ----
+const ITEMS = [{ what: 'on the search page', afterStep: 1 }, { what: 'on the listing', afterStep: 2 }];
+function dueCase(o: { rec: Record<string, unknown>; judge?: unknown; items?: Array<{ what: string; afterStep: number | null }>; withCheckpoints?: number[] }) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vqa-e-'));
+  const ev = evidence(dir, 'A', 'Final page: Listing 42 in Paris');
+  const checkpoints = (o.withCheckpoints ?? []).map((step) => {
+    const textFile = path.join(dir, `checkpoint-${step}.txt`);
+    const viewportShot = path.join(dir, `checkpoint-${step}.jpg`);
+    fs.writeFileSync(textFile, step === 1 ? 'Search results for France' : 'Listing 42 — Paris, France');
+    fs.writeFileSync(viewportShot, `CP${step}`);
+    return { step, url: 'https://a.example/', viewportShot, textFile };
+  });
+  const runDir = checklistRun([{ id: 'A', reliesOn: o.items ?? ITEMS }], { A: record('completed', { evidence: ev, checkpoints, ...o.rec }) });
+  if (o.judge !== undefined) judge(runDir, 'A', o.judge);
+  const m = buildReportModel(runDir, { configDir: TRANSCRIPTS });
+  return { row: m.rows[0], html: renderReport(m, fakeImage), checkpoints, runDir };
+}
+const relyJudge = (reliesOn: unknown[], keyPoints: unknown[] = []) => ({ keyPoints, reliesOn, verdict: 'needs_review', reason: 'r' });
+const searchMet = { what: 'on the search page', status: 'met', evidence: 'Search results for France', source: 'text' };
+const appProblem = { class: 'app_problem', reason: 'The Apply button does nothing' };
+
+test('app_problem give-up with its checkpoint: owes that item only; confirmed → FAIL', () => {
+  const { row, html } = dueCase({ rec: { status: 'gave_up', gaveUp: appProblem, currentStep: 1, evidence: null }, withCheckpoints: [1], judge: relyJudge([searchMet]) });
+  assert.deepEqual([row.verdict, row.reason], ['fail', 'The Apply button does nothing']);
+  assert.deepEqual(row.reliesOn.map((r) => [r.what, r.status]), [['on the search page', 'met']]);
+  assert.ok(!html.includes('on the listing'), 'an item not reached is not listed');
+});
+
+test('app_problem give-up whose checkpoint capture failed still owes the item → NEEDS REVIEW, never FAIL', () => {
+  for (const j of [undefined, relyJudge([{ ...searchMet, source: 'screenshot', evidence: 'search results shown' }])]) {
+    const { row } = dueCase({ rec: { status: 'gave_up', gaveUp: appProblem, currentStep: 1, evidence: null }, judge: j });
+    assert.deepEqual([row.verdict, row.reason], ['needs_review', 'Stopped on a page that may not be the right one: on the search page']);
+    assert.equal(row.reliesOn[0].status, 'unclear');
+    assert.equal(row.reliesOn[0].problem, 'no snapshot of this page was captured');
+  }
+});
+
+test('app_problem give-up before the first item step owes nothing → FAIL, with no "Ran on the right page?"', () => {
+  const { row, html } = dueCase({ rec: { status: 'gave_up', gaveUp: appProblem, currentStep: 0, evidence: null } });
+  assert.deepEqual([row.verdict, row.reliesOn], ['fail', []]);
+  assert.ok(!html.includes('Ran on the right page?'));
+});
+
+test('completed test with a missing checkpoint (not captured, or its file gone) → NEEDS REVIEW even if the judge says met', () => {
+  const allMet = relyJudge([{ ...searchMet, source: 'screenshot', evidence: 'results shown' }, { what: 'on the listing', status: 'met', evidence: 'Paris, France', source: 'text' }], [{ point: 'p', status: 'met', evidence: 'Listing 42', source: 'text' }]);
+  const notCaptured = dueCase({ rec: {}, withCheckpoints: [2], judge: { ...allMet, verdict: 'pass' } });
+  assert.deepEqual([notCaptured.row.verdict, notCaptured.row.reason], ['needs_review', "Couldn't confirm the test ran on the right page: on the search page"]);
+  assert.equal(notCaptured.row.reliesOn[0].problem, 'no snapshot of this page was captured');
+  const gone = dueCase({ rec: {}, withCheckpoints: [1, 2], judge: { ...allMet, verdict: 'pass' } });
+  assert.equal(gone.row.verdict, 'pass', 'control: with both checkpoints it passes');
+  fs.rmSync(gone.checkpoints[0].textFile);
+  const after = buildReportModel(gone.runDir, { configDir: TRANSCRIPTS }).rows[0];
+  assert.deepEqual([after.verdict, after.reliesOn[0].problem], ['needs_review', 'no snapshot of this page was captured']);
+});
+
+test('a final-page item is judged on the final page text', () => {
+  const items = [{ what: 'a Paris listing is open', afterStep: null }];
+  const ok = dueCase({ items, rec: {}, judge: { ...relyJudge([{ what: 'a Paris listing is open', status: 'met', evidence: 'Listing 42 in Paris', source: 'text' }], [{ point: 'p', status: 'met', evidence: 'Listing 42', source: 'text' }]), verdict: 'pass' } });
+  assert.equal(ok.row.verdict, 'pass');
+  const elsewhere = dueCase({ items, rec: {}, withCheckpoints: [1], judge: { ...relyJudge([{ what: 'a Paris listing is open', status: 'met', evidence: 'Search results for France', source: 'text' }], [{ point: 'p', status: 'met', evidence: 'Listing 42', source: 'text' }]), verdict: 'pass' } });
+  assert.equal(elsewhere.row.verdict, 'needs_review');
+  assert.deepEqual(elsewhere.row.quoteProblems, ['Search results for France']);
+});
+
+test('a NOT RUN row has no "Ran on the right page?" section', () => {
+  const runDir = checklistRun([{ id: 'A', reliesOn: ITEMS }, { id: 'B', reliesOn: ITEMS }], { A: record('not_started', { currentStep: 0 }), B: record('skipped', { skipReason: 'flag off', currentStep: 0 }) });
+  const m = buildReportModel(runDir, { configDir: TRANSCRIPTS });
+  assert.deepEqual(m.rows.map((r) => [r.verdict, r.reliesOn.length]), [['not_run', 0], ['not_run', 0]]);
+  assert.ok(!renderReport(m, fakeImage).includes('Ran on the right page?'));
+});
+
+test('an item whose quote failed the check is shown as not confirmed, with the quote problem, never ✓', () => {
+  const { row, html } = dueCase({ items: [ITEMS[0]], rec: {}, withCheckpoints: [1], judge: relyJudge([{ ...searchMet, evidence: 'Search results for Spain' }], [{ point: 'p', status: 'met', evidence: 'Listing 42', source: 'text' }]) });
+  assert.equal(row.verdict, 'needs_review');
+  assert.deepEqual([row.reliesOn[0].status, row.reliesOn[0].problem], ['unclear', 'quoted text is not on that page']);
+  const part = html.slice(html.indexOf('Ran on the right page?'));
+  assert.match(part, /<li class="kp unclear"><span>\?<\/span> on the search page/);
+  assert.ok(part.includes('quoted text is not on that page'));
+});
+
+test('a row without a screenshot says "no screenshot"', () => {
+  const runDir = checklistRun([{ id: 'A' }], { A: record('not_started', { currentStep: 0 }) });
+  const html = renderReport(buildReportModel(runDir, { configDir: TRANSCRIPTS }), fakeImage);
+  assert.ok(html.includes('<div class="noshot">no screenshot</div>'));
+  assert.ok(!html.includes('<div class="noshot">not run</div>'));
+});
+
+test('a filter that hides every row of a group hides that group heading too', async () => {
+  const { chromium } = await import('playwright');
+  const runDir = checklistRun(
+    [{ id: 'A1', group: 'first' }, { id: 'B1', group: 'second' }, { id: 'B2', group: 'second' }],
+    { A1: record('skipped', { skipReason: 'x' }), B1: record('gave_up', { gaveUp: { class: 'app_problem', reason: 'broken' } }), B2: record('skipped', { skipReason: 'y' }) },
+    { groups: [{ id: 'first', needs: 'Flag ON' }, { id: 'second', needs: 'Flag OFF' }] },
+  );
+  const html = renderReport(buildReportModel(runDir, { configDir: TRANSCRIPTS }), fakeImage);
+  const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage();
+    await page.setContent(html);
+    const visibleHeadings = () => page.$$eval('main section', (ss) => ss.filter((s) => !(s as HTMLElement).hidden).map((s) => s.querySelector('h2')?.textContent));
+    assert.deepEqual(await visibleHeadings(), ['Flag ON', 'Flag OFF']);
+    await page.click('button[data-f="fail"]');
+    assert.deepEqual(await visibleHeadings(), ['Flag OFF']);
+    // really off screen, not just flagged: author CSS (display:grid) must not override [hidden]
+    assert.equal(await page.isVisible('text=Title A1'), false);
+    assert.equal(await page.isVisible('text=Title B2'), false, 'a filtered-out row in a visible group is hidden');
+    assert.equal(await page.isVisible('h2:text("Flag ON")'), false);
+    assert.equal(await page.isVisible('article[data-verdict="fail"]'), true);
+    await page.click('button[data-f="all"]');
+    assert.deepEqual(await visibleHeadings(), ['Flag ON', 'Flag OFF']);
+  } finally {
+    await browser.close();
+  }
+});

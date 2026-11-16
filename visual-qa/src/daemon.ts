@@ -17,6 +17,7 @@ import { botBlockReason, describeFailed } from './network.ts';
 import { formatControl, takeSnapshot } from './snapshot.ts';
 import { CHROME_OFF_MESSAGE, connectChrome, explainConnectError, findChromeEndpoint } from './chrome.ts';
 import { writeReport } from './report.ts';
+import { dueReliesOn } from './relies-on.ts';
 import type { Suite } from './types.ts';
 
 export type ScenarioRecord = {
@@ -322,29 +323,17 @@ export async function startDaemon(runDir: string, opts: DaemonOptions = {}): Pro
       const rec = run.scenarios[s.id];
       const judgeOutputPath = path.join(runDir, 'scenarios', s.id, 'judge.json');
       const ev = rec?.evidence ?? null;
-      const checkpoints = rec?.checkpoints ?? [];
       const base = {
         id: s.id, url: ev?.url ?? '', title: ev?.title ?? '', httpStatus: ev?.httpStatus ?? null, consoleErrors: ev?.consoleErrors ?? [],
         errorPhrase: ev?.errorPhrase ?? null, textFile: ev?.textFile ?? '', viewportShot: ev?.viewportShot ?? '', fullPageShot: ev?.fullPageShot ?? '',
         judgeOutputPath,
       };
-      const checkpointOf = (afterStep: number) => checkpoints.find((c) => c.step === afterStep);
-      if (rec?.status === 'completed' && ev) {
-        const reliesOn = s.reliesOn.map((r) => {
-          const c = r.afterStep === null ? null : checkpointOf(r.afterStep);
-          return r.afterStep === null
-            ? { what: r.what, viewportShot: ev.viewportShot, textFile: ev.textFile }
-            : { what: r.what, viewportShot: c?.viewportShot ?? null, textFile: c?.textFile ?? null };
-        });
-        return { ...base, needsJudge: true, scope: 'full', expected: s.expected, reliesOn };
-      }
+      // the same due list the report checks; a checkpoint that was not captured is listed with null files
+      const reliesOn = rec ? dueReliesOn(s, rec).map(({ what, viewportShot, textFile }) => ({ what, viewportShot, textFile })) : [];
+      if (rec?.status === 'completed' && ev) return { ...base, needsJudge: true, scope: 'full', expected: s.expected, reliesOn };
       if (rec?.status === 'gave_up' && rec.gaveUp?.class === 'app_problem') {
-        const reliesOn = s.reliesOn.flatMap((r) => {
-          const c = r.afterStep === null ? undefined : checkpointOf(r.afterStep);
-          return c ? [{ what: r.what, viewportShot: c.viewportShot, textFile: c.textFile }] : [];
-        });
         if (reliesOn.length) return { ...base, needsJudge: true, scope: 'relies_on_only', reliesOn };
-        return { ...base, needsJudge: false, scope: null, reason: 'the test gave up on an app problem before any relies_on condition was captured', reliesOn: [] };
+        return { ...base, needsJudge: false, scope: null, reason: 'the test gave up on an app problem before the step of any relies_on condition', reliesOn: [] };
       }
       const why = rec?.status === 'gave_up' ? `the test gave up (${rec.gaveUp?.class ?? 'unknown'})` : `the test is ${rec?.status ?? 'unknown'}`;
       return { ...base, needsJudge: false, scope: null, reason: `nothing to judge: ${why}`, reliesOn: [] };

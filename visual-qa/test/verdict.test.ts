@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { computeVerdict, parseJudgeOutput, normalizeForQuote, type JudgeOutput, type KeyPoint } from '../src/verdict.ts';
+import { checkReliedOn, computeVerdict, parseJudgeOutput, normalizeForQuote, type DueRely, type JudgeOutput, type KeyPoint } from '../src/verdict.ts';
 
 const met = (point: string, evidence: string, source: KeyPoint['source'] = 'text'): KeyPoint => ({ point, status: 'met', evidence, source });
 const judge = (keyPoints: KeyPoint[], verdict: JudgeOutput['verdict'] = 'pass', reason = 'judge reason', reliesOn: JudgeOutput['reliesOn'] = []): JudgeOutput => ({ keyPoints, reliesOn, verdict, reason });
@@ -83,7 +83,7 @@ test('parseJudgeOutput rejects invalid JSON and bad shapes', () => {
 
 const REL_PAGE = 'Listing\nLocated in France\n$96 per year';
 const rel = (what: string, evidence: string, status: 'met' | 'not_met' | 'unclear' = 'met', source: 'text' | 'screenshot' = 'text') => ({ what, status, evidence, source });
-const due = [{ what: 'The listing is in France', pageText: REL_PAGE }];
+const due: DueRely[] = [{ what: 'The listing is in France', pageText: REL_PAGE }];
 const okPoints = [met('price', '$96')];
 const completed = (j: JudgeOutput | null, reliesOn = due, pageText = PAGE) => computeVerdict({ judge: j, pageText, gaveUp: null, skipped: null, reliesOn });
 
@@ -194,4 +194,33 @@ test('app_problem with a failing relies_on quote fills quoteProblems', () => {
 test('app_problem with null judge and items due → needs_review', () => {
   const v = computeVerdict({ judge: null, pageText: '', gaveUp: { class: 'app_problem', reason: 'x' }, skipped: null, reliesOn: due });
   assert.deepEqual([v.verdict, v.reason], ['needs_review', 'Stopped on a page that may not be the right one: The listing is in France']);
+});
+
+// ---- an item whose snapshot was never captured (pageText null) can never be confirmed ----
+const noSnap: DueRely[] = [{ what: 'The listing is in France', pageText: null }];
+const screenshotMet = [rel('The listing is in France', 'French flag next to the address', 'met', 'screenshot')];
+
+test('completed, relies_on item without a snapshot → needs_review even if the judge says met from a screenshot', () => {
+  const v = completed(judge(okPoints, 'pass', 'ok', screenshotMet), noSnap);
+  assert.deepEqual([v.verdict, v.reason, v.quoteProblems], ['needs_review', CANT, []]);
+});
+
+test('app_problem, due item without a snapshot → needs_review, never fail, whatever the judge says', () => {
+  for (const j of [null, judge([], 'needs_review', '', screenshotMet), judge([], 'needs_review', '', [rel('The listing is in France', 'Located in France')])]) {
+    const v = computeVerdict({ judge: j, pageText: '', gaveUp: { class: 'app_problem', reason: 'Button missing' }, skipped: null, reliesOn: noSnap });
+    assert.deepEqual([v.verdict, v.reason, v.quoteProblems], ['needs_review', 'Stopped on a page that may not be the right one: The listing is in France', []]);
+  }
+});
+
+test('checkReliedOn: confirmed, quote problem, no snapshot, missing entry', () => {
+  const ok = checkReliedOn(due[0], judge(okPoints, 'pass', 'ok', [rel('the listing is in france', 'Located in France')]));
+  assert.deepEqual(ok, { confirmed: true, shown: rel('the listing is in france', 'Located in France'), problem: null, quoteProblems: [] });
+  const badQuote = checkReliedOn(due[0], judge(okPoints, 'pass', 'ok', [rel('The listing is in France', 'Located in Spain')]));
+  assert.deepEqual(badQuote, { confirmed: false, shown: rel('The listing is in France', 'Located in Spain', 'unclear'), problem: 'quoted text is not on that page', quoteProblems: ['Located in Spain'] });
+  const missing = checkReliedOn(noSnap[0], judge(okPoints, 'pass', 'ok', screenshotMet));
+  assert.deepEqual(missing, { confirmed: false, shown: { ...screenshotMet[0], status: 'unclear' }, problem: 'no snapshot of this page was captured', quoteProblems: [] });
+  const none = checkReliedOn(due[0], judge(okPoints));
+  assert.deepEqual(none, { confirmed: false, shown: { what: 'The listing is in France', status: 'unclear', evidence: '', source: 'text' }, problem: 'not checked', quoteProblems: [] });
+  const notMet = checkReliedOn(due[0], judge(okPoints, 'pass', 'ok', [rel('The listing is in France', 'Located in Germany', 'not_met')]));
+  assert.deepEqual([notMet.confirmed, notMet.shown.status, notMet.problem], [false, 'not_met', null]);
 });

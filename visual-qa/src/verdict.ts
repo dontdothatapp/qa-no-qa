@@ -63,6 +63,35 @@ function quoteFoundOn(pageText: string, evidence: string): boolean {
   return quoted.length > 0 && quoted.some((q) => page.includes(normalizeForQuote(q)));
 }
 
+const isEmpty = (e: string) => !normalizeForQuote(e);
+
+/** A relies_on item that was due, with the text of the page it is judged on; null when no snapshot was captured. */
+export type DueRely = { what: string; pageText: string | null };
+
+/**
+ * Rule A for one due relies_on item: confirmed only when it has a snapshot, and every judge entry with the same
+ * (normalized) `what` is met, with evidence, and its text quote is on that item's page (a contradicting duplicate
+ * means unconfirmed). `shown` is what the report displays: never `met` unless confirmed.
+ */
+export function checkReliedOn(item: DueRely, judge: JudgeOutput | null): { confirmed: boolean; shown: RelyResult; problem: string | null; quoteProblems: string[] } {
+  const key = normalizeForQuote(item.what);
+  const entries = (judge?.reliesOn ?? []).filter((e) => normalizeForQuote(e.what) === key);
+  const entry = entries.find((e) => e.status !== 'met') ?? entries[0];
+  if (!entry) return { confirmed: false, shown: { what: item.what, status: 'unclear', evidence: '', source: 'text' }, problem: item.pageText === null ? 'no snapshot of this page was captured' : 'not checked', quoteProblems: [] };
+  const unconfirmed = (problem: string | null, quoteProblems: string[] = []) => ({
+    confirmed: false, shown: entry.status === 'met' ? { ...entry, status: 'unclear' as const } : entry, problem, quoteProblems,
+  });
+  if (item.pageText === null) return unconfirmed('no snapshot of this page was captured');
+  const pageText = item.pageText;
+  const badQuotes = [...new Set(entries
+    .filter((r) => r.status === 'met' && !isEmpty(r.evidence) && r.source === 'text' && !quoteFoundOn(pageText, r.evidence))
+    .map((r) => r.evidence))];
+  if (entry.status !== 'met') return unconfirmed(null, badQuotes);
+  if (entries.some((r) => isEmpty(r.evidence))) return unconfirmed('no evidence given', badQuotes);
+  if (badQuotes.length) return unconfirmed('quoted text is not on that page', badQuotes);
+  return { confirmed: true, shown: entry, problem: null, quoteProblems: [] };
+}
+
 /**
  * Final verdict (§6.4). The runner decides; the judge's own `verdict` field is only a consistency check.
  * A false pass is the worst outcome, so anything doubtful becomes needs_review.
@@ -73,7 +102,7 @@ export function computeVerdict(i: {
   pageText: string;
   gaveUp: GaveUpInfo | null;
   skipped: string | null;
-  reliesOn: Array<{ what: string; pageText: string }>;
+  reliesOn: DueRely[];
 }): { verdict: Verdict; reason: string; quoteProblems: string[] } {
   if (i.skipped !== null) return { verdict: 'not_run', reason: i.skipped, quoteProblems: [] };
   if (i.gaveUp?.class === 'no_matching_page') {
@@ -81,23 +110,12 @@ export function computeVerdict(i: {
   }
   if (i.gaveUp?.class === 'tooling_or_environment') return { verdict: 'needs_review', reason: i.gaveUp.reason, quoteProblems: [] };
 
-  // rule A: confirmed = judge entry with the same (normalized) what, met, evidence present, text quotes found on that page
   const quoteProblems: string[] = [];
   const unconfirmed: string[] = [];
-  const isEmpty = (e: string) => !normalizeForQuote(e);
   for (const item of i.reliesOn) {
-    const key = normalizeForQuote(item.what);
-    // every judge entry for this item must confirm it; a contradicting duplicate means unconfirmed
-    const entries = (i.judge?.reliesOn ?? []).filter((e) => normalizeForQuote(e.what) === key);
-    let confirmed = entries.length > 0;
-    for (const r of entries) {
-      if (r.status !== 'met' || isEmpty(r.evidence)) confirmed = false;
-      else if (r.source === 'text' && !quoteFoundOn(item.pageText, r.evidence)) {
-        confirmed = false;
-        if (!quoteProblems.includes(r.evidence)) quoteProblems.push(r.evidence);
-      }
-    }
-    if (!confirmed) unconfirmed.push(item.what);
+    const c = checkReliedOn(item, i.judge);
+    for (const q of c.quoteProblems) if (!quoteProblems.includes(q)) quoteProblems.push(q);
+    if (!c.confirmed) unconfirmed.push(item.what);
   }
 
   if (i.gaveUp?.class === 'app_problem') {

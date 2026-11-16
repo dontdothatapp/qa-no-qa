@@ -4,7 +4,11 @@ import { pathToFileURL } from 'node:url';
 import { readRunFile, type ScenarioRecord } from './daemon.ts';
 import { openEventLog } from './events.ts';
 import { claudeTokens, jevTokens, type ClaudeTokens, type JevTokens, type Usage4 } from './tokens.ts';
-import { computeVerdict, normalizeForQuote, parseJudgeOutput, type KeyPoint, type RelyResult, type Verdict } from './verdict.ts';
+import { dueReliesOn } from './relies-on.ts';
+import { checkReliedOn, computeVerdict, parseJudgeOutput, type DueRely, type KeyPoint, type RelyResult, type Verdict } from './verdict.ts';
+
+/** A due relies_on item as the report shows it: `met` only when confirmed; `problem` says why one was not. */
+export type ReportRely = RelyResult & { problem: string | null };
 
 export type ReportRow = {
   id: string;
@@ -17,9 +21,9 @@ export type ReportRow = {
   verdict: Verdict;
   reason: string;
   keyPoints: KeyPoint[];
-  /** The judge's answer per relies_on item; a missing entry is shown as unclear. */
-  reliesOn: RelyResult[];
-  /** relies_on item → viewport shot taken at its checkpoint. */
+  /** The judge's answer per due relies_on item (items not due are left out); a missing entry is shown as unclear. */
+  reliesOn: ReportRely[];
+  /** due relies_on item → viewport shot taken at its checkpoint. */
   checkpointShots: Record<string, string>;
   quoteProblems: string[];
   gates: { httpStatus: number | null; consoleErrors: string[]; failedRequests: string[]; errorPhrase: string | null };
@@ -77,14 +81,10 @@ export function buildReportModel(runDir: string, opts: { configDir?: string } = 
       status: 'not_started', currentStep: 0, jevActions: 0, claudeActions: 0, elapsedMs: 0, handbacks: [], madeUp: {}, gaveUp: null, evidence: null, checkpoints: [], skipReason: null,
     };
     const ev = rec.evidence;
-    const items = s.reliesOn ?? [];
     const judge = parseJudgeOutput(readText(path.join(runDir, 'scenarios', s.id, 'judge.json')) || 'null');
-    const checkpointOf = (afterStep: number | null) => (afterStep === null ? undefined : rec.checkpoints.find((c) => c.step === afterStep));
-    // the due list: a finished test owes every item; a give-up only owes the items it got far enough to capture
-    const due = (rec.gaveUp ? items.filter((r) => checkpointOf(r.afterStep)) : items).map((r) => ({
-      what: r.what,
-      pageText: readText(r.afterStep === null ? ev?.textFile : checkpointOf(r.afterStep)?.textFile),
-    }));
+    // the same due list `qa evidence` gives the judge; a snapshot that was not captured (or whose text is gone) can't confirm
+    const dueItems = dueReliesOn(s, rec);
+    const due: DueRely[] = dueItems.map((d) => ({ what: d.what, pageText: d.textFile !== null && fs.existsSync(d.textFile) ? readText(d.textFile) : null }));
     let v = computeVerdict({ judge, pageText: readText(ev?.textFile), gaveUp: rec.gaveUp, skipped: rec.status === 'skipped' ? rec.skipReason ?? 'skipped' : null, reliesOn: due });
     if (!rec.gaveUp && rec.status !== 'completed' && rec.status !== 'skipped') {
       v = rec.status === 'not_started'
@@ -93,13 +93,10 @@ export function buildReportModel(runDir: string, opts: { configDir?: string } = 
     }
     counts[v.verdict]++;
     const checkpointShots: Record<string, string> = {};
-    for (const r of items) {
-      const c = checkpointOf(r.afterStep);
-      if (c?.viewportShot) checkpointShots[r.what] = c.viewportShot;
-    }
-    const reliesOn: RelyResult[] = items.map((r) => {
-      const entries = (judge?.reliesOn ?? []).filter((e) => normalizeForQuote(e.what) === normalizeForQuote(r.what));
-      return entries.find((e) => e.status !== 'met') ?? entries[0] ?? { what: r.what, status: 'unclear', evidence: '', source: 'text' };
+    for (const d of dueItems) if (d.afterStep !== null && d.viewportShot) checkpointShots[d.what] = d.viewportShot;
+    const reliesOn: ReportRely[] = v.verdict === 'not_run' ? [] : due.map((d) => {
+      const c = checkReliedOn(d, judge);
+      return { ...c.shown, what: d.what, problem: c.problem };
     });
     return {
       id: s.id, group: s.group ?? null, source: s.source ?? null, title: s.title, steps: s.steps, expected: s.expected,
@@ -170,10 +167,10 @@ function rowHtml(r: ReportRow, readImage: (p: string) => Buffer, claudeAvailable
   const quoteIssues = r.quoteProblems.length ? `<h4>Quotes not found on the page</h4><ul>${r.quoteProblems.map((q) => `<li><q>${esc(q)}</q></li>`).join('')}</ul>` : '';
   const g = r.gates;
   const gates = `<h4>Page checks</h4><ul><li>HTTP status: ${g.httpStatus ?? 'n/a'}</li><li>Console errors: ${g.consoleErrors.length ? g.consoleErrors.map(esc).join('<br>') : 'none'}</li><li>Failed requests: ${g.failedRequests.length ? g.failedRequests.map(esc).join('<br>') : 'none'}</li><li>Error text on page: ${g.errorPhrase ? `<q>${esc(g.errorPhrase)}</q>` : 'none'}</li>${r.url ? `<li>Final URL: <code>${esc(r.url)}</code></li>` : ''}</ul>`;
-  const relies = r.reliesOn.length
+  const relies = r.reliesOn.length && r.verdict !== 'not_run'
     ? `<h4>Ran on the right page?</h4><ul class="points">${r.reliesOn.map((p) => {
         const shot = img(r.checkpointShots[p.what] ?? null, readImage);
-        return `<li class="kp ${p.status}"><span>${p.status === 'met' ? '✓' : p.status === 'not_met' ? '✕' : '?'}</span> ${esc(p.what)}${p.evidence ? ` <q>${esc(p.evidence)}</q>` : ''} <small>(${p.source})</small>${shot ? `<br><img class="cp" src="${shot}" alt="Page when checking: ${esc(p.what)}">` : ''}</li>`;
+        return `<li class="kp ${p.status}"><span>${p.status === 'met' ? '✓' : p.status === 'not_met' ? '✕' : '?'}</span> ${esc(p.what)}${p.evidence ? ` <q>${esc(p.evidence)}</q>` : ''} <small>(${p.problem ? esc(p.problem) : p.source})</small>${shot ? `<br><img class="cp" src="${shot}" alt="Page when checking: ${esc(p.what)}">` : ''}</li>`;
       }).join('')}</ul>`
     : '';
   const claudeTotal = sumUsage(r.claudeTokens);
@@ -182,7 +179,7 @@ function rowHtml(r: ReportRow, readImage: (p: string) => Buffer, claudeAvailable
   <div class="scenario">${r.source ? `<blockquote class="source">${esc(r.source)}</blockquote>` : ''}<h3>${esc(r.title)}</h3><ol>${r.steps.map((s) => `<li>${esc(s)}</li>`).join('')}</ol></div>
   <div class="expected">${esc(r.expected)}</div>
   <div class="verdict"><span class="badge ${r.verdict}">${ICON[r.verdict]} ${LABEL[r.verdict]}</span><p>${esc(r.reason)}</p>${points}${relies}</div>
-  <div class="shot">${thumb ? `<button class="thumb" data-full="${thumb}" aria-label="Enlarge screenshot of ${esc(r.id)}"><img src="${thumb}" alt="Screenshot of ${esc(r.id)}"></button>` : '<div class="noshot">not run</div>'}</div>
+  <div class="shot">${thumb ? `<button class="thumb" data-full="${thumb}" aria-label="Enlarge screenshot of ${esc(r.id)}"><img src="${thumb}" alt="Screenshot of ${esc(r.id)}"></button>` : '<div class="noshot">no screenshot</div>'}</div>
   <div class="meta">${dur(r.elapsedMs)} · Jev ${r.jevActions} action${r.jevActions === 1 ? '' : 's'} · Claude ${r.claudeActions} action${r.claudeActions === 1 ? '' : 's'} · Jev ${tok(r.jevTokens.input + r.jevTokens.output)} tok · ${claudeAvailable ? `Claude ${tok(claudeTotal)} tok` : 'Claude n/a'}</div>
   <details><summary>Details</summary><div class="details">${quoteIssues}${handbacks}${madeUp}${gates}${full ? `<h4>Full page</h4><img class="full" src="${full}" alt="Full-page screenshot of ${esc(r.id)}">` : ''}</div></details>
 </article>`;
@@ -211,7 +208,7 @@ export function renderReport(m: ReportModel, readImage: (p: string) => Buffer): 
 <style>
 :root{--bg:#f7f7f5;--card:#fff;--ink:#1d1d1b;--muted:#6b6b66;--line:#e3e2dc;--pass:#1f7a4d;--pass-bg:#e5f4ec;--fail:#b3261e;--fail-bg:#fbe9e7;--rev:#8a5a00;--rev-bg:#fdf3dc;--nr:#5f6368;--nr-bg:#ececea}
 @media (prefers-color-scheme:dark){:root{--bg:#161615;--card:#1f1f1d;--ink:#ecebe6;--muted:#a3a29b;--line:#34332f;--pass:#6fd19c;--pass-bg:#173326;--fail:#ff8a80;--fail-bg:#3a1c1a;--rev:#f0c060;--rev-bg:#3a2e12;--nr:#b0b0aa;--nr-bg:#2a2a28}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif}
+*{box-sizing:border-box}[hidden]{display:none!important}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif}
 header{padding:28px 24px 12px;max-width:1280px;margin:auto}h1{margin:0 0 4px;font-size:24px}.sub{color:var(--muted)}
 .summary{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:14px 0}.chip{padding:3px 10px;border-radius:99px;font-weight:600;font-size:13px}
 .chip.pass{background:var(--pass-bg);color:var(--pass)}.chip.fail{background:var(--fail-bg);color:var(--fail)}.chip.needs_review{background:var(--rev-bg);color:var(--rev)}.chip.not_run{background:var(--nr-bg);color:var(--nr)}
@@ -245,7 +242,7 @@ ${sections}
 <dialog id="viewer"><img alt="Enlarged screenshot"></dialog>
 <script>
 const v=document.getElementById('viewer');document.querySelectorAll('.thumb').forEach(b=>b.addEventListener('click',()=>{v.querySelector('img').src=b.dataset.full;v.showModal();}));v.addEventListener('click',()=>v.close());
-document.querySelectorAll('.filters button').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.filters button').forEach(x=>x.setAttribute('aria-pressed',String(x===b)));document.querySelectorAll('.row').forEach(r=>{r.hidden=b.dataset.f!=='all'&&r.dataset.verdict!==b.dataset.f;});}));
+document.querySelectorAll('.filters button').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.filters button').forEach(x=>x.setAttribute('aria-pressed',String(x===b)));document.querySelectorAll('.row').forEach(r=>{r.hidden=b.dataset.f!=='all'&&r.dataset.verdict!==b.dataset.f;});document.querySelectorAll('main section').forEach(s=>{s.hidden=!s.querySelector('.row:not([hidden])');});}));
 </script></body></html>`;
 }
 

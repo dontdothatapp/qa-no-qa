@@ -1,121 +1,105 @@
 # Visual QA for Claude Code
 
-A [Claude Code](https://claude.com/claude-code) skill that runs plain-language browser test scenarios and gives you an HTML report with a verdict and a screenshot for each one.
+Paste a QA checklist into [Claude Code](https://claude.com/claude-code), and Visual QA tests every check in your own Chrome, then hands you a report with a verdict and a screenshot for each one.
+A fast navigator, **Jev** by [TypeSafe](https://docs.typesafe.ai), clicks through the pages; **Claude** takes over when Jev gets stuck, and judges every result.
 
-You describe what to test ("open the shop → add the backpack to the cart → the cart shows 1 item"). A fast navigator model, **Jev** by [TypeSafe](https://docs.typesafe.ai), clicks through the steps in a real browser. **Claude** takes over whenever Jev gets stuck, then judges every result from its screenshot and page text.
+## Install
 
-```
-scenarios (YAML or plain words)
-   → Jev drives the browser, step by step      (fast, cheap)
-   → Claude takes over when Jev is unsure      (only when needed)
-   → Claude judges each result                 (screenshots + page text)
-   → ~/QA/<date> <topic>/report.html           (verdicts, inline screenshots, token usage)
-```
+You need a Mac, Claude Code, Google Chrome 144 or newer, and a TypeSafe account for the key. TypeSafe bills Jev's usage; the Claude part runs on your Claude subscription.
 
-Each scenario ends as **PASS**, **FAIL** or **NEEDS REVIEW**. NEEDS REVIEW covers anything the tool cannot vouch for: a sign-in wall, bot protection such as reCAPTCHA, or a judgement that doesn't match its own evidence. A test is never counted as passed on a guess.
+Paste this into Claude Code:
 
-## Requirements
+> Install Visual QA: if Node.js 22.18 or newer isn't installed, install it. Then run `claude plugin marketplace add dontdothatapp/qa-no-qa` and `claude plugin install visual-qa@qa-no-qa`, and tell me to type /reload-plugins and then /visual-qa:setup.
 
-- macOS (the only platform tested)
-- [Claude Code](https://claude.com/claude-code). The Claude part runs on your Claude subscription.
-- Node.js 22.18 or newer
-- A TypeSafe API key for Jev. TypeSafe bills Jev usage.
-- Google Chrome 144 or newer, if you want tests to run in your own signed-in Chrome
+Claude runs the install. If your Mac needs Node.js and Claude can't install it for you, it asks you to run the installer from nodejs.org (it may ask for your Mac password). Then:
 
-## Setup
+1. Type `/reload-plugins` (or restart Claude Code).
+2. Type `/visual-qa:setup`. It checks what's missing and walks you through it, one thing at a time. You'll do two things yourself:
+   - **Add your TypeSafe key.** Your TypeSafe key page opens in the browser, and a small key file opens in TextEdit. Copy the key, paste it after `TYPESAFE_API_KEY=`, save, and tell Claude you're done. Never paste the key into the chat.
+   - **Switch on remote debugging in Chrome.** A Chrome page opens with a remote-debugging switch near the top. Switch it on. This lets tests open tabs in your Chrome. You only do this once.
 
-```bash
-git clone https://github.com/dontdothatapp/qa-no-qa.git ~/Projects/qa-no-qa
-cd ~/Projects/qa-no-qa/visual-qa
-npm ci
-npx playwright install chromium
-```
+You can run `/visual-qa:setup` again any time. To get updates automatically: type `/plugin`, open Marketplaces, choose qa-no-qa and turn on auto-update.
 
-Register the skill with Claude Code:
+## Use
 
-```bash
-mkdir -p ~/.claude/skills
-ln -s ~/Projects/qa-no-qa/visual-qa ~/.claude/skills/visual-qa
+Type `/visual-qa:test` and paste your checklist as it is: bullets, ☐ boxes, sections, notes. Include the site's address. For example:
+
+```text
+Tests on https://staging.example.com. I'm signed in as a test customer; the "new checkout" flag is ON.
+☐ Product page shows the price and an "Add to cart" button
+☐ Adding two items → the cart badge shows 2
+☐ Checkout shows my saved address; a new address can be saved
+☐ Promo code SAVE10 takes 10% off the total
+Flag OFF
+☐ Checkout shows the old one-page form
+☐ Signed out: opening checkout asks you to sign in
 ```
 
-Add your TypeSafe key to `~/.visual-qa/.env`, or to `.visual-qa/.env` in the repo root. The repo's `.gitignore` excludes `.visual-qa/`.
+Claude tells the checks apart from background notes, works out how to test each line, and finds the right pages on its own. It asks questions only when neither your checklist nor the site can answer them, such as which account to use, or a link to a record no page shows. All questions come in one message. Then it says something like "Running 6 checks in 2 groups" and starts.
 
-```
-TYPESAFE_API_KEY=your-key-here
-```
+You don't have to type the slash command. "Test this on staging.example.com", followed by your checklist, works too.
 
-Check the setup:
+## During a run
 
-```bash
-node ~/.claude/skills/visual-qa/bin/qa.ts doctor
-```
+- **Click Allow.** When a run starts, Chrome asks whether to allow the connection. Click **Allow**. This usually happens once per run.
+- **Test tabs come to the front.** Each check opens a new tab in your Chrome, in front of your own tabs, signed in as you are. The tab closes when the check is done. Don't type in Chrome until the run finishes. Signed-out checks run in a separate signed-out Chrome window that closes by itself.
+- **Pauses between groups.** Checks are grouped by the setup they need, for example the feature flag on or off, or which account is signed in. Between groups, the run pauses and tells you what to change. Make the change, then say **go**. Say **skip** to leave that group out, or **stop** to end the run there.
+- **A report at every pause.** Each pause writes the report so far, so you have results even if you stop.
+- **Continue later.** You can leave a run paused and pick it up in a new chat: type `/visual-qa:test continue`, or say "continue my last QA run". It runs only the checks that were left, as a new report that links back to the first one.
 
-Every check should report `"ok":true`. Warnings don't stop a run.
+If a pause lasts a long time, Chrome may ask you to click **Allow** again.
 
-To test in your own Chrome, open `chrome://inspect/#remote-debugging` in Chrome and switch remote debugging on. Chrome asks you to **Allow** the connection when a run starts.
+## The report
 
-## Usage
+When the run ends, Claude posts a short summary with a link to the report. Each run gets its own folder in `~/QA/`, named by date and topic. Its `report.html` is a single file with the screenshots built in, so you can send it to someone as it is.
 
-Start a new Claude Code session and run:
+Every check ends as one of:
 
-```
-/visual-qa path/to/scenarios.yaml
-```
+- **PASS**: the page shows what the check expects.
+- **FAIL**: it doesn't.
+- **NEEDS REVIEW**: the tool can't vouch for the result. For example, it couldn't confirm the test ran on the right page, it hit a sign-in wall or bot protection, or its judgement didn't match its own evidence. Look at the screenshot and decide.
+- **NOT RUN**: skipped at a pause, not reached, or something no page can show (an email, a background job).
 
-Or run `/visual-qa` and describe the scenarios in plain words. Claude drafts the YAML file, saves it to `~/QA/scenarios/`, shows it to you, and waits for your OK before running it.
+A check is never counted as passed on a guess.
 
-A scenario file:
+Each row shows your original checklist line, then how it was tested: the steps, and the result Claude expected. A vague line such as "can save" gets a concrete reading, and the row shows which one. Next to it are the verdict, the reason with quotes from the page, and a screenshot you can click to enlarge.
 
-```yaml
-topic: Checkout flow
-base_url: https://staging.example.com
-browser: isolated            # isolated = fresh browser, logged out (default: chrome = your own Chrome)
-scenarios:
-  - id: CO-01
-    title: Guest can reach the payment step
-    start: /products/backpack
-    steps:
-      - Click "Add to cart"
-      - Open the cart and click "Checkout"
-      - Fill the shipping form
-      - Click "Continue"
-    values:
-      Full name: Test User
-      Postcode: "10115"
-    expected: 'Payment form is visible; order summary shows "1 item"'
-```
+**Ran on the right page?** lists what the check depends on, such as "the listing is in France", and whether the page confirmed it. If any of these can't be confirmed, the check is NEEDS REVIEW, even if everything else looks right: a pass on the wrong page proves nothing.
 
-The full format and tips for writing good scenarios are in [visual-qa/reference/scenario-format.md](visual-qa/reference/scenario-format.md).
-
-**Browser modes**
-- `chrome` (the default): scenarios run as new tabs in your running Chrome, using your existing sign-ins. The tool only touches tabs it opened, and never closes Chrome.
-- `isolated`: every scenario starts in a fresh, invisible Chromium. To test a signed-in flow, save a login once and point the scenario's `session:` at it:
-  ```bash
-  node ~/.claude/skills/visual-qa/bin/qa.ts login staging-user https://staging.example.com/login
-  ```
-  A browser window opens. Sign in, then close the window. The login is saved to `~/.visual-qa/sessions/`.
-
-**Output:** each run gets a folder `~/QA/<YYYY-MM-DD> <topic>/`. Its `report.html` is self-contained, with screenshots embedded in the page, so you can send it as a single file. The folder also holds the raw evidence: full-page screenshots, page text, an event log, and Jev and Claude token usage.
+Your pasted checklist is at the top of the report, and Jev and Claude usage is at the bottom.
 
 ## Privacy and safety
 
-- While scenarios run, page text is sent to TypeSafe so Jev can choose the next action. In Chrome mode that includes text from pages you're signed in to.
-- The tool never types passwords. Password fields stay empty, and scenario files that contain passwords are rejected. Signed-in flows use your Chrome or a saved login instead.
-- The tool doesn't submit, buy or delete anything unless a step explicitly asks for it. It also stays on the hosts you allow (`allow_hosts`, which defaults to the `base_url` host).
-- **Bot protection is not bypassed.** When a site's reCAPTCHA, captcha or similar check refuses a request, the scenario stops as NEEDS REVIEW and the report shows the refusal. To test such flows, use an environment where the protection is off, or where it uses test keys.
+- While tests run, page text is sent to TypeSafe (Jev's provider) so Jev can choose the next step. That includes text from pages you're signed in to.
+- Your TypeSafe key stays in a file on your Mac, `~/.visual-qa/.env`. Setup opens it in TextEdit for you, so the key never goes through the chat (chats are saved).
+- Tests act in your real accounts. They don't submit, buy or delete anything unless a check asks for it, and they stay on the site you're testing.
+- The tool never types passwords. Password fields stay empty, and signed-in checks use the sign-ins already in your Chrome. Leave passwords out of your checklist.
+- The tool only touches tabs and windows it opened. It never signs you out, and never closes Chrome.
+- **Bot protection is not bypassed.** When a site's reCAPTCHA, captcha or similar check refuses a request, the check stops as NEEDS REVIEW and the report shows the refusal. To test such flows, use an environment where the protection is off, or where it uses test keys.
 
-## Development
+## For developers
 
 ```bash
-cd visual-qa
-npm test            # unit and browser tests against a local fixture site
+git clone https://github.com/dontdothatapp/qa-no-qa.git
+cd qa-no-qa/visual-qa
+npm ci
+npx playwright install chromium   # only for the test suite
+npm test                          # unit and browser tests against a local fixture site
 npm run typecheck
 ```
 
-- `visual-qa/SKILL.md`: the checklist Claude follows during a run.
-- `visual-qa/reference/`: briefs for the takeover and judge agents, and the scenario format.
-- `visual-qa/src/`: the runner, a small local daemon that drives Playwright, asks Jev for each next action, collects evidence and writes the report.
-- `docs/superpowers/`: the design spec, implementation plans and build notes.
+To try your working copy as a plugin, run `claude plugin marketplace add ./` from the repo root, then `claude plugin install visual-qa@qa-no-qa`. A local marketplace copies the working tree as it is, including `node_modules`.
+
+Claude turns a pasted checklist into an internal YAML scenario file in `~/QA/scenarios/`. The format is in [visual-qa/reference/scenario-format.md](visual-qa/reference/scenario-format.md). `/visual-qa:test path/to/file.yaml` runs a scenario file directly.
+
+- `.claude-plugin/marketplace.json`: the `qa-no-qa` marketplace.
+- `visual-qa/`: the `visual-qa` plugin.
+  - `skills/test/SKILL.md` and `skills/setup/SKILL.md`: what Claude follows for `/visual-qa:test` and `/visual-qa:setup`.
+  - `reference/`: briefs for intake (checklist to tests), takeovers and the judge, and the scenario format.
+  - `bin/`: the `qa.ts` runner command and `setup.ts`.
+  - `src/`: the runner, a small local daemon that drives Chrome with Playwright, asks Jev for each next action, collects evidence and writes the report.
+  - `test/`: unit and browser tests; `test/acceptance/fixture-suite.yaml` is the live acceptance suite.
+- `docs/superpowers/`: design specs, implementation plans and build notes.
 - `reports/`, `research_notes/`: the research the design started from.
 
 ## License

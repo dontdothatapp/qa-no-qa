@@ -1,21 +1,32 @@
-# Live acceptance suite (plan Task 14). Serve the fixtures first: node test/fixtures/serve.ts
+# Live acceptance suite. Serve the fixtures first (from visual-qa/): node test/fixtures/serve.ts
+# Group g1 runs as you are. Group g2 needs you signed in to the fixture site in Chrome, so the run pauses once between them.
 # BRK-* scenarios are deliberately broken: none of them may come out PASS.
+# BRK-05's relies_on is false on purpose: it must come out NEEDS REVIEW ("Couldn't confirm the test ran on the right page: ...").
+# LO-01 runs in a separate signed-out window: it must show the sign-in page even though you are signed in.
 topic: Fixture acceptance
 base_url: http://localhost:4173
+groups:
+  - id: g1
+    needs: As you are now (these checks need no sign-in)
+  - id: g2
+    needs: 'Sign in to the fixture site in Chrome: open http://localhost:4173/login.html, type any username, leave the password empty and click "Sign in"'
 scenarios:
   - id: NAV-01
+    group: g1
     title: Home links to the shop
     start: /index.html
     steps: ['Click "Shop"']
     expected: 'The shop page shows "Cart: 0" and two products, Backpack and Bolt T-Shirt'
 
   - id: SRCH-01
+    group: g1
     title: Search submits on Enter
     start: /search.html
     steps: ['Search for "espresso"']
     expected: 'The results list shows "Espresso — strong Italian coffee"'
 
   - id: FORM-01
+    group: g1
     title: Shipping form submits
     start: /form.html
     steps: [Fill the shipping form, 'Click "Submit"']
@@ -23,32 +34,44 @@ scenarios:
     expected: 'The page says "Thanks! Your form was submitted."'
 
   - id: SHOP-01
+    group: g1
     title: Add the right product when labels repeat
     start: /shop.html
     steps: ['Click "Add to cart" for the Backpack']
     expected: 'The cart shows "Cart: 1" and the page says "Added Backpack"'
 
+  - id: REL-01
+    group: g1
+    title: Cart counts two different products
+    source: "☐ Shop: add the Backpack and the T-shirt → cart shows 2"
+    start: /index.html
+    steps:
+      - Click "Shop"
+      - Click "Add to cart" for the Backpack
+      - Click "Add to cart" for the Bolt T-Shirt
+    relies_on:
+      - what: The shop lists a Backpack priced $29.99 and a Bolt T-Shirt priced $15.99
+        after_step: 1
+      - what: The page is still the shop, with the "Shop" heading
+    expected: 'The cart shows "Cart: 2" and the page says "Added Bolt T-Shirt"'
+
   - id: IFR-01
+    group: g1
     title: Accept terms inside an iframe
     start: /iframe.html
     steps: ['Click "Accept terms"']
     expected: 'The terms box says "Accepted"'
 
   - id: UPL-01
+    group: g1
     title: Upload an attachment
     start: /upload.html
     steps: ['Upload the attachment file']
     values: {Attachment: ../fixtures/site/sample.txt}
     expected: 'The page shows "Chosen: sample.txt"'
 
-  - id: ACC-01
-    title: Saved login opens the account page
-    session: fixture-user
-    start: /account.html
-    steps: [Check that the account overview is shown]
-    expected: 'The page greets "Welcome, Test User"'
-
   - id: DE-01
+    group: g1
     title: German address form
     start: /de.html
     steps: [Fill the address form, 'Click "Absenden"']
@@ -56,18 +79,21 @@ scenarios:
     expected: 'The page says "Thanks! Your form was submitted."'
 
   - id: BRK-01
+    group: g1
     title: "[broken] Cart counter does not increase"
     start: /broken/shop.html
     steps: ['Click "Add to cart" for the Backpack']
     expected: 'The cart shows "Cart: 1"'
 
   - id: BRK-02
+    group: g1
     title: "[broken] Annual pricing badge missing"
     start: /broken/pricing.html
     steps: ['Click "Annual"']
     expected: 'Prices show yearly totals ("$96 / year") and a "Save 20%" badge'
 
   - id: BRK-03
+    group: g1
     title: "[broken] Form submit does nothing"
     start: /broken/form.html
     steps: [Fill the shipping form, 'Click "Submit"']
@@ -75,7 +101,38 @@ scenarios:
     expected: 'The page says "Thanks! Your form was submitted."'
 
   - id: BRK-04
+    group: g1
     title: "[broken] Search returns nothing"
     start: /broken/search.html
     steps: ['Search for "espresso"']
     expected: 'The results list mentions espresso'
+
+  - id: BRK-05
+    group: g1
+    title: "[broken] Relies on a price the shop does not show"
+    source: "☐ Backpack at $49.99 → adding it shows Cart: 1"
+    start: /shop.html
+    steps:
+      - Check that the shop lists the Backpack
+      - Click "Add to cart" for the Backpack
+    relies_on:
+      - what: The Backpack is priced $49.99
+        after_step: 1
+    expected: 'The cart shows "Cart: 1"'
+
+  - id: ACC-01
+    group: g2
+    title: Signed-in account page greets the user
+    source: "☐ Signed in: account page shows the welcome greeting"
+    start: /account.html
+    steps: [Check that the account overview is shown]
+    expected: 'The page greets "Welcome, Test User"'
+
+  - id: LO-01
+    group: g2
+    title: Signed out, the account page asks you to sign in
+    source: "☐ Signed out: account page asks you to sign in"
+    logged_out: true
+    start: /account.html
+    steps: [Check which page is shown]
+    expected: 'The "Sign in" page is shown with Username and Password fields; there is no "Welcome, Test User" greeting'

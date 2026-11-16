@@ -108,7 +108,7 @@ test('report command writes report.html and results.json', async () => {
     const r = await cmd(d, 'report');
     assert.equal(r.body.ok, true, r.body.error ?? '');
     assert.equal(r.body.result.reportPath, path.join(runDir, 'report.html'));
-    assert.equal(r.body.result.summary, '1 pass · 2 needs review');
+    assert.equal(r.body.result.summary, '1 pass · 2 not run');
     assert.ok(fs.existsSync(path.join(runDir, 'results.json')));
     assert.match(fs.readFileSync(path.join(runDir, 'report.html'), 'utf8'), /data:image\/jpeg;base64,/);
   } finally {

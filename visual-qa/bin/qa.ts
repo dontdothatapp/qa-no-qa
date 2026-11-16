@@ -13,12 +13,14 @@ import { clearCurrentRun, DaemonUnreachable, isOurDaemon, readCurrentRun, sendCo
 import { writeReport } from '../src/report.ts';
 import { CHROME_OFF_MESSAGE, findChromeEndpoint } from '../src/chrome.ts';
 import { createScriptedClient, createTypeSafeClient, JevError, type JevAnswer, type JevClient } from '../src/jev-client.ts';
-import { loadSuite, SuiteError } from '../src/scenarios.ts';
+import { groupOrder, loadSuite, SuiteError } from '../src/scenarios.ts';
+import { findLatestUnfinishedRun } from '../src/runs.ts';
+import { outputRoot } from '../src/config.ts';
 import { runDoctor } from '../src/doctor.ts';
 import { chromium } from 'playwright';
 import { TypeSafeClient, noul } from '@typesafe-ai/sdk';
 
-export const COMMANDS = ['start', 'daemon', 'run', 'resume', 'look', 'act', 'shot', 'step-done', 'giveup', 'evidence', 'report', 'stop', 'doctor'] as const;
+export const COMMANDS = ['start', 'daemon', 'run', 'resume', 'look', 'act', 'shot', 'step-done', 'giveup', 'skip', 'reopen', 'remaining', 'evidence', 'report', 'stop', 'doctor'] as const;
 export type CommandName = (typeof COMMANDS)[number];
 
 const BIN = fs.realpathSync(fileURLToPath(import.meta.url));
@@ -60,7 +62,7 @@ async function waitFor(file: string, child: { exited: boolean }, ms: number): Pr
 
 async function start(positionals: string[], values: Record<string, unknown>): Promise<unknown> {
   const file = positionals[0];
-  if (!file) throw new UsageError('usage: qa start <scenarios.yaml> --session <id>');
+  if (!file) throw new UsageError('usage: qa start <scenarios.yaml> --session <id> [--only <id,id>] [--continues <runDir>]');
   const current = readCurrentRun();
   if (current) {
     if (isOurDaemon(current.pid)) throw new Error(`a run is already active (pid ${current.pid}, ${current.runDir}) — finish it or run: qa stop`);
@@ -73,9 +75,36 @@ async function start(positionals: string[], values: Record<string, unknown>): Pr
     if (e instanceof SuiteError) throw new Error(`invalid scenario file: ${e.problems.join('; ')}`);
     throw e;
   }
+  const only = typeof values.only === 'string' ? values.only.split(',').map((x) => x.trim()).filter(Boolean) : null;
+  if (only) {
+    const unknown = only.filter((id) => !suite.scenarios.some((s) => s.id === id));
+    if (unknown.length) throw new Error(`unknown scenario id in --only: ${unknown.join(', ')}`);
+    const keep = new Set(only);
+    suite.scenarios = suite.scenarios.filter((s) => keep.has(s.id));
+    const usedGroups = new Set(suite.scenarios.map((s) => s.group));
+    suite.groups = suite.groups.filter((g) => usedGroups.has(g.id));
+  }
   if (!findChromeEndpoint()) throw new Error(CHROME_OFF_MESSAGE);
+  const continuesFrom = typeof values.continues === 'string' ? path.resolve(values.continues) : null;
+  const runDir = createRunFolder(suite, typeof values.session === 'string' ? values.session : null, new Date(), process.env, continuesFrom);
+  copyTestFiles(file, runDir);
+  await spawnDaemon(runDir, chromeDeadlineMs());
+  return { runDir, scenarios: suite.scenarios.map((s) => s.id), groups: groupOrder(suite), judgeModel: suite.judgeModel };
+}
+
+const chromeDeadlineMs = () => Number(process.env.VISUAL_QA_DAEMON_START_TIMEOUT_MS ?? 110_000);
+
+/** Keeps the test file and its checklist with the run, so a later chat can continue it. */
+function copyTestFiles(file: string, runDir: string): void {
+  fs.copyFileSync(file, path.join(runDir, 'tests.yaml'));
+  const checklist = [file.replace(/\.ya?ml$/i, '') + '.checklist.txt', path.join(path.dirname(file), 'checklist.txt')].find((f) => fs.existsSync(f));
+  if (checklist) fs.copyFileSync(checklist, path.join(runDir, 'checklist.txt'));
+}
+
+/** Starts the daemon on an existing run folder, waits until it is connected to Chrome, and records it as the current run. */
+async function spawnDaemon(runDir: string, chromeDeadlineMs: number): Promise<void> {
   process.stderr.write('Click "Allow" in Chrome to let the QA run connect.\n');
-  const runDir = createRunFolder(suite, typeof values.session === 'string' ? values.session : null, new Date());
+  fs.rmSync(path.join(runDir, 'daemon.json'), { force: true }); // a reopened run has the old daemon's file
   const log = fs.openSync(path.join(runDir, 'daemon.log'), 'a');
   const child = spawn(process.execPath, [BIN, 'daemon', runDir], { detached: true, stdio: ['ignore', log, log], env: process.env });
   const state = { exited: false };
@@ -83,14 +112,27 @@ async function start(positionals: string[], values: Record<string, unknown>): Pr
   child.unref();
   let d;
   try {
-    const deadline = Number(process.env.VISUAL_QA_DAEMON_START_TIMEOUT_MS ?? 110_000);
-    d = await waitFor(path.join(runDir, 'daemon.json'), state, deadline);
+    d = await waitFor(path.join(runDir, 'daemon.json'), state, chromeDeadlineMs);
   } catch (e) {
     try { if (child.pid) process.kill(child.pid, 'SIGTERM'); } catch { /* already gone */ }
     throw e;
   }
   writeCurrentRun({ runDir, port: d.port, token: d.token, pid: d.pid });
-  return { runDir, scenarios: suite.scenarios.map((s) => s.id), judgeModel: suite.judgeModel };
+}
+
+async function reopen(values: Record<string, unknown>): Promise<unknown> {
+  const current = readCurrentRun();
+  const wanted = typeof values['run-dir'] === 'string' ? path.resolve(values['run-dir']) : current?.runDir;
+  if (!wanted) throw new Error('no run to reopen — pass the run folder: qa reopen --run-dir <dir>');
+  if (current && isOurDaemon(current.pid)) {
+    if (current.runDir === wanted) return { reopened: false, alive: true, runDir: wanted };
+    throw new Error(`another run is active (pid ${current.pid}, ${current.runDir}) — finish it or run: qa stop`);
+  }
+  if (!fs.existsSync(path.join(wanted, 'run.json'))) throw new Error(`${wanted} is not a run folder (no run.json)`);
+  if (current) clearCurrentRun(); // stale: the daemon is gone
+  if (!findChromeEndpoint()) throw new Error(CHROME_OFF_MESSAGE);
+  await spawnDaemon(wanted, chromeDeadlineMs());
+  return { reopened: true, runDir: wanted };
 }
 
 async function stop(): Promise<unknown> {
@@ -121,7 +163,7 @@ export async function main(argv: string[]): Promise<number> {
     const { positionals, values } = parseArgs({
       args: rest,
       allowPositionals: true,
-      options: { session: { type: 'string' }, class: { type: 'string' }, reason: { type: 'string' }, 'made-up': { type: 'boolean' } },
+      options: { session: { type: 'string' }, class: { type: 'string' }, reason: { type: 'string' }, only: { type: 'string' }, continues: { type: 'string' }, 'run-dir': { type: 'string' }, 'made-up': { type: 'boolean' } },
     });
     switch (name as CommandName) {
       case 'start':
@@ -153,6 +195,15 @@ export async function main(argv: string[]): Promise<number> {
       }
       case 'giveup':
         print(await sendCommand('giveup', { id: needId(positionals, 'giveup <id> --class <c> --reason <text>'), class: values.class, reason: values.reason }));
+        return 0;
+      case 'skip':
+        print(await sendCommand('skip', { id: needId(positionals, 'skip <id> --reason <text>'), reason: values.reason }));
+        return 0;
+      case 'reopen':
+        print(await reopen(values));
+        return 0;
+      case 'remaining':
+        print(findLatestUnfinishedRun(outputRoot()) ?? { found: false });
         return 0;
       case 'report': {
         // works without a live daemon: the report only needs the run folder

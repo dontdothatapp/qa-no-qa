@@ -475,3 +475,126 @@ test('evidence for an app_problem give-up with a checkpoint is relies_on_only; w
     await d.close();
   }
 });
+
+function groupedSuiteFile(dir: string): string {
+  const file = path.join(dir, 'suite.yaml');
+  fs.writeFileSync(file, `topic: Grouped
+base_url: ${server.url}/
+groups:
+  - {id: g1, needs: Flag ON}
+  - {id: g2, needs: Flag OFF}
+scenarios:
+  - {id: A, title: a, group: g1, start: /thanks.html, steps: [Look], expected: Thanks}
+  - {id: B, title: b, group: g2, start: /thanks.html, steps: [Look], expected: Thanks}
+  - {id: C, title: c, group: g1, start: /thanks.html, steps: [Look], expected: Thanks}
+`);
+  return file;
+}
+
+test('start lists groups in order and copies the test file and checklist into the run folder', async () => {
+  const dir = tmp('start-groups');
+  const fake = path.join(dir, 'jev.json');
+  fs.writeFileSync(fake, '[]');
+  const file = groupedSuiteFile(dir);
+  fs.writeFileSync(path.join(dir, 'suite.checklist.txt'), '☐ the checklist\n');
+  const env = cliEnv(path.join(dir, 'state'), path.join(dir, 'out'), fake);
+  const started = await qa(['start', file, '--session', 'x'], env);
+  assert.equal(started.code, 0, started.out);
+  try {
+    const out = JSON.parse(started.out);
+    assert.deepEqual(out.groups, [
+      { id: 'g1', needs: 'Flag ON', scenarios: ['A', 'C'] },
+      { id: 'g2', needs: 'Flag OFF', scenarios: ['B'] },
+    ]);
+    assert.deepEqual(out.scenarios, ['A', 'B', 'C']);
+    assert.equal(out.browser, undefined);
+    assert.equal(out.note, undefined);
+    assert.equal(fs.readFileSync(path.join(out.runDir, 'tests.yaml'), 'utf8'), fs.readFileSync(file, 'utf8'));
+    assert.equal(fs.readFileSync(path.join(out.runDir, 'checklist.txt'), 'utf8'), '☐ the checklist\n');
+  } finally {
+    await qa(['stop'], env);
+  }
+});
+
+test('start --only keeps those tests and drops empty groups; --continues is recorded', async () => {
+  const dir = tmp('start-only');
+  const fake = path.join(dir, 'jev.json');
+  fs.writeFileSync(fake, '[]');
+  const file = groupedSuiteFile(dir);
+  const env = cliEnv(path.join(dir, 'state'), path.join(dir, 'out'), fake);
+  const earlier = path.join(dir, 'earlier run');
+  fs.mkdirSync(earlier);
+  const started = await qa(['start', file, '--session', 'x', '--only', 'C,B', '--continues', earlier], env);
+  assert.equal(started.code, 0, started.out);
+  try {
+    const out = JSON.parse(started.out);
+    assert.deepEqual(out.scenarios, ['B', 'C']);
+    assert.deepEqual(out.groups, [{ id: 'g1', needs: 'Flag ON', scenarios: ['C'] }, { id: 'g2', needs: 'Flag OFF', scenarios: ['B'] }]);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(out.runDir, 'run.json'), 'utf8')).continuesFrom, earlier);
+    await qa(['stop'], env);
+    const only = JSON.parse((await qa(['start', file, '--session', 'x', '--only', 'B'], env)).out);
+    assert.deepEqual(only.groups, [{ id: 'g2', needs: 'Flag OFF', scenarios: ['B'] }]);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(only.runDir, 'run.json'), 'utf8')).continuesFrom, null);
+    await qa(['stop'], env);
+    const bad = await qa(['start', file, '--session', 'x', '--only', 'B,Z'], env);
+    assert.notEqual(bad.code, 0);
+    assert.match(bad.out, /unknown scenario id.*Z/);
+  } finally {
+    await qa(['stop'], env);
+  }
+});
+
+test('skip marks a never-started test skipped; skipping a started test is refused', async () => {
+  const { d, runDir } = await inProcess([{ operation: 'done' }]);
+  try {
+    assert.equal((await cmd(d, 'run', { id: 'S1' })).body.result.status, 'completed');
+    const refused = await cmd(d, 'skip', { id: 'S1', reason: 'not needed' });
+    assert.equal(refused.body.ok, false);
+    assert.equal(refused.body.error, 'scenario S1 already started');
+    const noReason = await cmd(d, 'skip', { id: 'S2' });
+    assert.equal(noReason.body.ok, false);
+    assert.match(noReason.body.error ?? '', /--reason/);
+    const ok = await cmd(d, 'skip', { id: 'S2', reason: 'flag is off' });
+    assert.equal(ok.body.ok, true, JSON.stringify(ok.body));
+    assert.equal(ok.body.result.status, 'skipped');
+    const run = JSON.parse(fs.readFileSync(path.join(runDir, 'run.json'), 'utf8'));
+    assert.equal(run.scenarios.S2.status, 'skipped');
+    assert.equal(run.scenarios.S2.skipReason, 'flag is off');
+    assert.equal((await cmd(d, 'skip', { id: 'S2', reason: 'again' })).body.error, 'scenario S2 already started');
+  } finally {
+    await d.close();
+  }
+});
+
+test('after the daemon stops, run says to reopen; reopen reconnects and does not re-run finished tests', async () => {
+  const dir = tmp('reopen');
+  const fake = path.join(dir, 'jev.json');
+  fs.writeFileSync(fake, JSON.stringify([{ operation: 'done' }, { operation: 'done' }]));
+  const env = cliEnv(path.join(dir, 'state'), path.join(dir, 'out'), fake);
+  const s = JSON.parse((await qa(['start', suiteFile(dir), '--session', 'x'], env)).out);
+  try {
+    assert.equal(JSON.parse((await qa(['run', 'S1'], env)).out).status, 'completed');
+    const alive = JSON.parse((await qa(['reopen'], env)).out);
+    assert.deepEqual(alive, { reopened: false, alive: true, runDir: s.runDir });
+    const current = JSON.parse(fs.readFileSync(path.join(dir, 'state', 'current-run.json'), 'utf8'));
+    process.kill(current.pid, 'SIGKILL');
+    await new Promise((res) => setTimeout(res, 500));
+    const down = await qa(['run', 'S2'], env);
+    assert.notEqual(down.code, 0);
+    assert.match(JSON.parse(down.out).error, /qa reopen/);
+    const re = await qa(['reopen'], env);
+    assert.equal(re.code, 0, re.out);
+    assert.deepEqual(JSON.parse(re.out), { reopened: true, runDir: s.runDir });
+    const starts = () => fs.readFileSync(path.join(s.runDir, 'events.jsonl'), 'utf8').split('\n').filter((l) => l.includes('"scenario_start"') && l.includes('"S1"')).length;
+    const before = starts();
+    const again = JSON.parse((await qa(['run', 'S1'], env)).out);
+    assert.equal(again.status, 'completed');
+    assert.equal(again.id, 'S1');
+    assert.equal(starts(), before, 'no new scenario_start for S1');
+    const second = await qa(['run', 'S2'], env);
+    assert.equal(second.code, 0, second.out);
+    assert.equal(JSON.parse(second.out).status, 'completed');
+  } finally {
+    await qa(['stop'], env);
+  }
+});

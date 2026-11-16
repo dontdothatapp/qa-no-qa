@@ -20,7 +20,7 @@ import { writeReport } from './report.ts';
 import type { Suite } from './types.ts';
 
 export type ScenarioRecord = {
-  status: 'not_started' | 'running' | 'handback' | 'completed' | 'gave_up';
+  status: 'not_started' | 'running' | 'handback' | 'completed' | 'gave_up' | 'skipped';
   currentStep: number;
   jevActions: number;
   claudeActions: number;
@@ -30,23 +30,30 @@ export type ScenarioRecord = {
   gaveUp: GaveUp | null;
   evidence: Evidence | null;
   checkpoints: Checkpoint[];
+  skipReason: string | null;
 };
 
 export type RunFile = {
   suite: Suite;
   sessionId: string | null;
   startedAt: string;
+  /** The earlier run this one continues (absolute path), or null. */
+  continuesFrom: string | null;
   madeUpCache: Record<string, string>;
   scenarios: Record<string, ScenarioRecord>;
 };
 
 const emptyRecord = (): ScenarioRecord => ({
-  status: 'not_started', currentStep: 0, jevActions: 0, claudeActions: 0, elapsedMs: 0, handbacks: [], madeUp: {}, gaveUp: null, evidence: null, checkpoints: [],
+  status: 'not_started', currentStep: 0, jevActions: 0, claudeActions: 0, elapsedMs: 0, handbacks: [], madeUp: {}, gaveUp: null, evidence: null, checkpoints: [], skipReason: null,
 });
 
 export function readRunFile(runDir: string): RunFile {
   const run: RunFile = JSON.parse(fs.readFileSync(path.join(runDir, 'run.json'), 'utf8'));
-  for (const rec of Object.values(run.scenarios)) rec.checkpoints ??= []; // older runs have none
+  for (const rec of Object.values(run.scenarios)) {
+    rec.checkpoints ??= []; // older runs have none
+    rec.skipReason ??= null;
+  }
+  run.continuesFrom ??= null;
   return run;
 }
 
@@ -57,12 +64,12 @@ function writeRunFile(runDir: string, run: RunFile): void {
 }
 
 /** Creates <outputRoot>/<date> <topic>/ with a fresh run.json and returns its path. */
-export function createRunFolder(suite: Suite, sessionId: string | null, now: Date, env: Record<string, string | undefined> = process.env): string {
+export function createRunFolder(suite: Suite, sessionId: string | null, now: Date, env: Record<string, string | undefined> = process.env, continuesFrom: string | null = null): string {
   const runDir = runFolderName(suite.topic, now, fs.existsSync, env);
   fs.mkdirSync(runDir, { recursive: true });
   const scenarios: Record<string, ScenarioRecord> = {};
   for (const s of suite.scenarios) scenarios[s.id] = emptyRecord();
-  writeRunFile(runDir, { suite, sessionId, startedAt: now.toISOString(), madeUpCache: {}, scenarios });
+  writeRunFile(runDir, { suite, sessionId, startedAt: now.toISOString(), continuesFrom, madeUpCache: {}, scenarios });
   return runDir;
 }
 
@@ -76,6 +83,8 @@ export type DaemonOptions = RunnerTimeouts & {
 };
 
 class CommandError extends Error {}
+
+const isFinished = (status: ScenarioRecord['status']) => status === 'completed' || status === 'gave_up' || status === 'skipped';
 
 export async function startDaemon(runDir: string, opts: DaemonOptions = {}): Promise<{ port: number; token: string; close(): Promise<void> }> {
   const run = readRunFile(runDir);
@@ -107,7 +116,7 @@ export async function startDaemon(runDir: string, opts: DaemonOptions = {}): Pro
     run.scenarios[state.scenario.id] = {
       status: state.status, currentStep: state.currentStep, jevActions: state.jevActions, claudeActions: state.claudeActions,
       elapsedMs: Date.now() - state.startedAt, handbacks: state.handbacks, madeUp: state.madeUpUsed, gaveUp: state.gaveUp, evidence: state.evidence,
-      checkpoints: [...state.checkpoints],
+      checkpoints: [...state.checkpoints], skipReason: null,
     };
     writeRunFile(runDir, run);
   };
@@ -121,7 +130,11 @@ export async function startDaemon(runDir: string, opts: DaemonOptions = {}): Pro
   const openState = (id: unknown): ScenarioState => {
     const s = scenarioOf(id);
     const state = states.get(s.id);
-    if (!state) throw new CommandError(`scenario ${s.id} has not been started — use: run ${s.id}`);
+    if (!state) {
+      const rec = run.scenarios[s.id];
+      if (rec && isFinished(rec.status)) throw new CommandError(`scenario ${s.id} is already ${rec.status}`);
+      throw new CommandError(`scenario ${s.id} has not been started — use: run ${s.id}`);
+    }
     if (state.status === 'completed' || state.status === 'gave_up') throw new CommandError(`scenario ${s.id} is already ${state.status}`);
     return state;
   };
@@ -133,6 +146,16 @@ export async function startDaemon(runDir: string, opts: DaemonOptions = {}): Pro
   const commands: Record<string, (a: Record<string, unknown>) => Promise<unknown>> = {
     async run(a) {
       const s = scenarioOf(a.id);
+      const stored = run.scenarios[s.id];
+      if (!states.has(s.id) && stored && isFinished(stored.status)) {
+        // finished before the daemon was reopened: report what was stored, open nothing
+        const steps = s.steps;
+        return {
+          id: s.id, status: stored.status, step: stored.currentStep, stepText: stored.currentStep < steps.length ? steps[stored.currentStep] : null,
+          jevActions: stored.jevActions, claudeActions: stored.claudeActions, elapsedMs: stored.elapsedMs,
+          ...(stored.gaveUp ? { gaveUp: stored.gaveUp } : {}), ...(stored.skipReason ? { skipReason: stored.skipReason } : {}),
+        };
+      }
       const existing = states.get(s.id);
       if (existing) {
         if (existing.status === 'completed' || existing.status === 'gave_up') return resultOf(existing);
@@ -264,6 +287,8 @@ export async function startDaemon(runDir: string, opts: DaemonOptions = {}): Pro
       if (!reason) throw new CommandError('--reason is required');
       const requested: GaveUp = { class: cls, reason };
       const state = states.get(s.id);
+      const stored = run.scenarios[s.id];
+      if (!state && stored && isFinished(stored.status)) throw new CommandError(`scenario ${s.id} is already ${stored.status}`);
       if (!state) {
         events.append({ type: 'giveup', id: s.id, ...requested });
         run.scenarios[s.id] = { ...emptyRecord(), status: 'gave_up', gaveUp: requested };
@@ -279,6 +304,17 @@ export async function startDaemon(runDir: string, opts: DaemonOptions = {}): Pro
       persist(state);
       await finishIfDone(state);
       return result;
+    },
+
+    async skip(a) {
+      const s = scenarioOf(a.id);
+      const reason = String(a.reason ?? '').trim();
+      if (!reason) throw new CommandError('--reason is required');
+      if (states.has(s.id) || (run.scenarios[s.id] && run.scenarios[s.id].status !== 'not_started')) throw new CommandError(`scenario ${s.id} already started`);
+      events.append({ type: 'skip', id: s.id, reason });
+      run.scenarios[s.id] = { ...emptyRecord(), status: 'skipped', skipReason: reason };
+      writeRunFile(runDir, run);
+      return { id: s.id, status: 'skipped', skipReason: reason };
     },
 
     async evidence(a) {

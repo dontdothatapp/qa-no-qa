@@ -60,7 +60,7 @@ export async function sendCommand(name: string, args: Record<string, unknown>, e
       signal: AbortSignal.timeout(timeoutMs),
     });
   } catch {
-    throw new DaemonUnreachable(`the run daemon is not responding (pid ${run.pid}) — run: qa stop, then start again`);
+    throw new DaemonUnreachable(`the run's connection to Chrome has ended (e.g. after a long pause) — run: qa reopen`);
   }
   const body = (await res.json()) as { ok: boolean; result?: unknown; error?: string };
   if (!body.ok) throw new Error(body.error ?? `HTTP ${res.status}`);

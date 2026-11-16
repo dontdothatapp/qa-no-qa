@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { openScenario, runJev, type ScenarioState } from '../src/scenario-runner.ts';
 import { openEventLog } from '../src/events.ts';
+import { performAction } from '../src/actions.ts';
 import { createScriptedClient, JevError, type JevAnswer } from '../src/jev-client.ts';
 import { takeSnapshot } from '../src/snapshot.ts';
 import type { Scenario, Suite } from '../src/types.ts';
@@ -173,6 +174,18 @@ test('after a new_tab hand-back, resume does not loop on the same flag (M1)', as
   assert.equal(first.result.reason, 'new_tab');
   const second = await run(state, runDir, [{ operation: 'done' }]);
   assert.equal(second.result.status, 'completed');
+});
+
+test('upload paths in a scenario are relative to the scenario file, so suites work on any machine', async () => {
+  const s = scenario({ start: '/upload.html', steps: ['Upload the attachment'] });
+  const suite = { ...suiteFor(s), sourcePath: path.join(import.meta.dirname, 'fixtures', 'suite.yaml') };
+  const state = await openScenario(fx.browser(), suite, s, null, {}, FAST);
+  const snap = await takeSnapshot(state.page, { frames: false, maxTextChars: 100 });
+  const input = snap.controls.find((c) => c.name === 'Attachment');
+  assert.ok(input, 'file input exists');
+  const res = await performAction(state, snap, { op: 'upload', ref: input.ref, value: 'site/sample.txt' }, FAST);
+  assert.deepEqual(res, { ok: true });
+  assert.equal(await state.page.textContent('#chosen'), 'Chosen: sample.txt');
 });
 
 test('the site refusing a request with a reCAPTCHA 403 ends the scenario as blocked, not as a hand-back', async () => {

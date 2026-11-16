@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { DEFAULTS } from './config.ts';
 import { locatorFor, type Snapshot } from './snapshot.ts';
 import type { ScenarioState } from './scenario-runner.ts';
@@ -60,9 +61,12 @@ export async function performAction(
       case 'goto':
         await page.goto(a.value!, { timeout: navTimeout });
         break;
-      case 'upload':
-        await loc!.setInputFiles(a.value!, { timeout });
+      case 'upload': {
+        // relative paths are relative to the scenario file, so a suite works wherever it is checked out
+        const file = path.isAbsolute(a.value!) ? a.value! : path.resolve(path.dirname(state.suite.sourcePath), a.value!);
+        await loc!.setInputFiles(file, { timeout });
         break;
+      }
       case 'switch_tab': {
         const pages = state.ownPages.filter((p) => !p.isClosed()); // never the user's own tabs
         const i = Number(a.value ?? a.ref);

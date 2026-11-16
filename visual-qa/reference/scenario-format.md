@@ -36,6 +36,7 @@ scenarios:
 - **Quote exact button or link text** with double quotes. A single quoted value in a typing step (`Search for "espresso"`) is typed as-is.
 - **Say when to submit.** Forms are only submitted when a step asks for it.
 - **Values** go in `values` (field label → text). Unspecified fields may be filled with obviously fake test data by Claude, and those values are listed in the report.
+- **Files to upload** go in `values` too (e.g. `Attachment: files/invoice.pdf`); a relative path is relative to the scenario file.
 - **Expected results must be observable** on the final page: visible text, elements, layout. Split several checks with `;`.
 - **Quote text that contains `: `** (colon + space), e.g. `expected: 'Cart shows "Cart: 1"'`, or YAML will reject the file.
 - **No passwords.** Passwords are not supported: keys like `Password`, `PIN` or `Passcode` in `values` are rejected, and password fields are never filled. Scenarios behind a login use a signed-in session instead.

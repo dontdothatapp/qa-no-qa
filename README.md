@@ -117,3 +117,7 @@ npm run typecheck
 - `visual-qa/src/`: the runner, a small local daemon that drives Playwright, asks Jev for each next action, collects evidence and writes the report.
 - `docs/superpowers/`: the design spec, implementation plans and build notes.
 - `reports/`, `research_notes/`: the research the design started from.
+
+## License
+
+[MIT](LICENSE)

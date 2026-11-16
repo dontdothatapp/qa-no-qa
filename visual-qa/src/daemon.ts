@@ -6,11 +6,11 @@ import type { Socket } from 'node:net';
 import type { Browser } from 'playwright';
 import { DEFAULTS, runFolderName } from './config.ts';
 import { ACTION_OPS, performAction, type ActionOp } from './actions.ts';
-import { captureEvidence, type Evidence } from './evidence.ts';
+import { type Checkpoint, type Evidence } from './evidence.ts';
 import { openEventLog, type EventLog } from './events.ts';
 import { createTypeSafeClient, type JevClient } from './jev-client.ts';
 import {
-  advanceStep, blockedGiveUp, closeScenario, completeScenario, finishGaveUp, isAllowedUrl, openLoggedOutScenario, openScenarioInContext,
+  blockedGiveUp, closeScenario, completeScenario, finishGaveUp, isAllowedUrl, markStepDone, openLoggedOutScenario, openScenarioInContext,
   resultOf, runJev, settleResponses, stopIfBlocked, type GaveUp, type RunnerTimeouts, type ScenarioState,
 } from './scenario-runner.ts';
 import { botBlockReason, describeFailed } from './network.ts';
@@ -29,6 +29,7 @@ export type ScenarioRecord = {
   madeUp: Record<string, string>;
   gaveUp: GaveUp | null;
   evidence: Evidence | null;
+  checkpoints: Checkpoint[];
 };
 
 export type RunFile = {
@@ -40,11 +41,13 @@ export type RunFile = {
 };
 
 const emptyRecord = (): ScenarioRecord => ({
-  status: 'not_started', currentStep: 0, jevActions: 0, claudeActions: 0, elapsedMs: 0, handbacks: [], madeUp: {}, gaveUp: null, evidence: null,
+  status: 'not_started', currentStep: 0, jevActions: 0, claudeActions: 0, elapsedMs: 0, handbacks: [], madeUp: {}, gaveUp: null, evidence: null, checkpoints: [],
 });
 
 export function readRunFile(runDir: string): RunFile {
-  return JSON.parse(fs.readFileSync(path.join(runDir, 'run.json'), 'utf8'));
+  const run: RunFile = JSON.parse(fs.readFileSync(path.join(runDir, 'run.json'), 'utf8'));
+  for (const rec of Object.values(run.scenarios)) rec.checkpoints ??= []; // older runs have none
+  return run;
 }
 
 function writeRunFile(runDir: string, run: RunFile): void {
@@ -104,6 +107,7 @@ export async function startDaemon(runDir: string, opts: DaemonOptions = {}): Pro
     run.scenarios[state.scenario.id] = {
       status: state.status, currentStep: state.currentStep, jevActions: state.jevActions, claudeActions: state.claudeActions,
       elapsedMs: Date.now() - state.startedAt, handbacks: state.handbacks, madeUp: state.madeUpUsed, gaveUp: state.gaveUp, evidence: state.evidence,
+      checkpoints: [...state.checkpoints],
     };
     writeRunFile(runDir, run);
   };
@@ -239,8 +243,7 @@ export async function startDaemon(runDir: string, opts: DaemonOptions = {}): Pro
         await finishIfDone(state);
         return blocked;
       }
-      events.append({ type: 'step_done', id: state.scenario.id, step: state.currentStep, actor: 'claude' });
-      advanceStep(state);
+      await markStepDone(state, events, runDir, 'claude');
       let result;
       if (state.currentStep >= state.scenario.steps.length) {
         result = await completeScenario(state, events, runDir, t);
@@ -280,13 +283,35 @@ export async function startDaemon(runDir: string, opts: DaemonOptions = {}): Pro
 
     async evidence(a) {
       const s = scenarioOf(a.id);
-      const ev = run.scenarios[s.id]?.evidence;
-      if (!ev) throw new CommandError(`no evidence for ${s.id} (status: ${run.scenarios[s.id]?.status ?? 'unknown'})`);
-      return {
-        id: s.id, expected: s.expected, url: ev.url, title: ev.title, httpStatus: ev.httpStatus, consoleErrors: ev.consoleErrors,
-        errorPhrase: ev.errorPhrase, textFile: ev.textFile, viewportShot: ev.viewportShot, fullPageShot: ev.fullPageShot,
-        judgeOutputPath: path.join(runDir, 'scenarios', s.id, 'judge.json'),
+      const rec = run.scenarios[s.id];
+      const judgeOutputPath = path.join(runDir, 'scenarios', s.id, 'judge.json');
+      const ev = rec?.evidence ?? null;
+      const checkpoints = rec?.checkpoints ?? [];
+      const base = {
+        id: s.id, url: ev?.url ?? '', title: ev?.title ?? '', httpStatus: ev?.httpStatus ?? null, consoleErrors: ev?.consoleErrors ?? [],
+        errorPhrase: ev?.errorPhrase ?? null, textFile: ev?.textFile ?? '', viewportShot: ev?.viewportShot ?? '', fullPageShot: ev?.fullPageShot ?? '',
+        judgeOutputPath,
       };
+      const checkpointOf = (afterStep: number) => checkpoints.find((c) => c.step === afterStep);
+      if (rec?.status === 'completed' && ev) {
+        const reliesOn = s.reliesOn.map((r) => {
+          const c = r.afterStep === null ? null : checkpointOf(r.afterStep);
+          return r.afterStep === null
+            ? { what: r.what, viewportShot: ev.viewportShot, textFile: ev.textFile }
+            : { what: r.what, viewportShot: c?.viewportShot ?? null, textFile: c?.textFile ?? null };
+        });
+        return { ...base, needsJudge: true, scope: 'full', expected: s.expected, reliesOn };
+      }
+      if (rec?.status === 'gave_up' && rec.gaveUp?.class === 'app_problem') {
+        const reliesOn = s.reliesOn.flatMap((r) => {
+          const c = r.afterStep === null ? undefined : checkpointOf(r.afterStep);
+          return c ? [{ what: r.what, viewportShot: c.viewportShot, textFile: c.textFile }] : [];
+        });
+        if (reliesOn.length) return { ...base, needsJudge: true, scope: 'relies_on_only', reliesOn };
+        return { ...base, needsJudge: false, scope: null, reason: 'the test gave up on an app problem before any relies_on condition was captured', reliesOn: [] };
+      }
+      const why = rec?.status === 'gave_up' ? `the test gave up (${rec.gaveUp?.class ?? 'unknown'})` : `the test is ${rec?.status ?? 'unknown'}`;
+      return { ...base, needsJudge: false, scope: null, reason: `nothing to judge: ${why}`, reliesOn: [] };
     },
 
     async report() {

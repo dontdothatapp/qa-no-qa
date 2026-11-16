@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { Browser, BrowserContext, Page } from 'playwright';
 import { connectChrome } from '../src/chrome.ts';
-import { openScenarioInContext, openLoggedOutScenario, closeScenario, runJev } from '../src/scenario-runner.ts';
+import { openScenarioInContext, openLoggedOutScenario, closeScenario, runJev, markStepDone } from '../src/scenario-runner.ts';
 import { performAction } from '../src/actions.ts';
 import { openEventLog } from '../src/events.ts';
 import { createScriptedClient, type JevClient } from '../src/jev-client.ts';
@@ -115,4 +115,31 @@ test('closing the logged-out window mid-test hands back with error', async () =>
   const r = await runJev(state, deps(createScriptedClient([{ operation: 'done' }])));
   assert.equal(r.status, 'handback');
   assert.equal(r.reason, 'error');
+});
+
+test('a relies_on item with after_step 1 gets a checkpoint after step 1', async () => {
+  const s = scenario({ steps: ['one', 'two'], reliesOn: [{ what: 'x', afterStep: 1 }] });
+  const state = await openScenarioInContext(ctx, suite(s), s, {}, FAST);
+  const d = deps(createScriptedClient([{ operation: 'done' }, { operation: 'done' }]));
+  const r = await runJev(state, d);
+  assert.equal(r.status, 'completed');
+  assert.equal(state.checkpoints.length, 1);
+  assert.equal(state.checkpoints[0].step, 1);
+  assert.ok(fs.existsSync(state.checkpoints[0].viewportShot));
+  assert.ok(fs.existsSync(state.checkpoints[0].textFile));
+  assert.equal(path.basename(state.checkpoints[0].textFile), 'checkpoint-1.txt');
+  await closeScenario(state);
+});
+
+test('a failed checkpoint capture does not stop the step', async () => {
+  const s = scenario({ steps: ['one', 'two'], reliesOn: [{ what: 'x', afterStep: 1 }] });
+  const state = await openScenarioInContext(ctx, suite(s), s, {}, FAST);
+  const d = deps(createScriptedClient([]));
+  await markStepDone(state, d.events, d.runDir, 'claude', async () => { throw new Error('boom'); });
+  assert.equal(state.currentStep, 1);
+  assert.equal(state.checkpoints.length, 0);
+  const failed = d.events.read().find((e) => e.type === 'checkpoint_failed');
+  assert.equal(failed?.step, 1);
+  assert.equal(failed?.error, 'boom');
+  await closeScenario(state);
 });

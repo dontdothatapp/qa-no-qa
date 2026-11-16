@@ -2,7 +2,7 @@ import type { Browser, BrowserContext, Page } from 'playwright';
 import { DEFAULTS } from './config.ts';
 import { buildJevRequest } from './decide.ts';
 import { performAction, type ActionOp } from './actions.ts';
-import { captureEvidence, type Evidence } from './evidence.ts';
+import { captureCheckpoint, captureEvidence, type Checkpoint, type Evidence } from './evidence.ts';
 import type { EventLog } from './events.ts';
 import { effectiveOperation, evaluate, type HandbackReason } from './handback.ts';
 import { JevError, type JevClient } from './jev-client.ts';
@@ -39,6 +39,8 @@ export type ScenarioState = {
   status: 'running' | 'handback' | 'completed' | 'gave_up';
   gaveUp: GaveUp | null;
   evidence: Evidence | null;
+  /** Page captures at the steps where a relies_on condition should be visible. */
+  checkpoints: Checkpoint[];
   lastNavStatus: number | null;
   consoleErrors: string[];
   newTabOpened: boolean;
@@ -120,7 +122,7 @@ async function initScenario(
     currentStep: 0, stepActions: 0, scenarioActions: 0, claudeActions: 0, jevActions: 0,
     startedAt: Date.now(), elapsedMs: 0,
     hashBeforeLastAction: null, unchangedCount: 0, recentActions: [], stepActionLog: [], lastTypedRef: null, lastSnapshot: null,
-    madeUp, madeUpUsed: {}, handbacks: [], status: 'running', gaveUp: null, evidence: null,
+    madeUp, madeUpUsed: {}, handbacks: [], status: 'running', gaveUp: null, evidence: null, checkpoints: [],
     lastNavStatus: null, consoleErrors: [], newTabOpened: false, openError: null, crashed: false,
     ownsContext, ownPages: [page], failedRequests: [], botBlock: null, pendingResponses: new Set(),
   };
@@ -236,6 +238,23 @@ export function advanceStep(state: ScenarioState): void {
   state.lastTypedRef = null;
 }
 
+/**
+ * Records that the current step is done and moves on. When a relies_on condition should be visible after
+ * this step, captures the page for it; a capture failure is logged and never stops the step.
+ */
+export async function markStepDone(
+  state: ScenarioState, events: EventLog, runDir: string, actor: 'jev' | 'claude', capture: typeof captureCheckpoint = captureCheckpoint,
+): Promise<void> {
+  events.append({ type: 'step_done', id: state.scenario.id, step: state.currentStep, actor });
+  advanceStep(state);
+  if (!state.scenario.reliesOn.some((r) => r.afterStep === state.currentStep)) return;
+  try {
+    state.checkpoints.push(await capture(state, runDir, state.currentStep));
+  } catch (e) {
+    events.append({ type: 'checkpoint_failed', id: state.scenario.id, step: state.currentStep, error: ((e as Error).message ?? String(e)).split('\n')[0] });
+  }
+}
+
 export async function completeScenario(state: ScenarioState, events: EventLog, runDir: string, t: RunnerTimeouts = {}): Promise<RunResult> {
   const blocked = await stopIfBlocked(state, events, runDir, t);
   if (blocked) return blocked;
@@ -344,8 +363,7 @@ export async function runJev(state: ScenarioState, deps: { jev: JevClient; event
     }
 
     if (eff.operation === 'done') {
-      events.append({ type: 'step_done', id: s.id, step: state.currentStep, actor: 'jev' });
-      advanceStep(state);
+      await markStepDone(state, events, runDir, 'jev');
       continue;
     }
 

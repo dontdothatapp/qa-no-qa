@@ -18,6 +18,9 @@ export type Evidence = {
   errorPhrase: string | null;
 };
 
+/** A screenshot and the page text at the step where a relies_on condition should be visible. */
+export type Checkpoint = { step: number; url: string; viewportShot: string; textFile: string };
+
 const ERROR_PHRASE = /something went wrong|page not found|internal server error|\b404\b/i;
 
 /** Waits for the page to settle (load + short pause, never networkidle) and records evidence files. */
@@ -49,4 +52,19 @@ export async function captureEvidence(state: ScenarioState, runDir: string, opts
     fullPageShot,
     errorPhrase: text.match(ERROR_PHRASE)?.[0] ?? null,
   };
+}
+
+/** Records the page as it is right after `step` (1-based) was done: scenarios/<id>/checkpoint-<step>.jpg and .txt. */
+export async function captureCheckpoint(state: ScenarioState, runDir: string, step: number): Promise<Checkpoint> {
+  const page = state.page;
+  const scenarioDir = path.join(runDir, 'scenarios', state.scenario.id);
+  fs.mkdirSync(scenarioDir, { recursive: true });
+  await page.waitForLoadState('load', { timeout: 5000 }).catch(() => {});
+  await page.waitForTimeout(DEFAULTS.settleMs);
+  const viewportShot = path.join(scenarioDir, `checkpoint-${step}.jpg`);
+  await page.screenshot({ type: 'jpeg', quality: DEFAULTS.jpegQuality, scale: 'css', animations: 'disabled', timeout: 15000, path: viewportShot });
+  const text = await withTimeout(page.evaluate(() => document.body?.innerText ?? ''), 5000, 'reading page text').catch(() => '');
+  const textFile = path.join(scenarioDir, `checkpoint-${step}.txt`);
+  fs.writeFileSync(textFile, text.slice(0, DEFAULTS.evidenceTextChars));
+  return { step, url: page.url(), viewportShot, textFile };
 }

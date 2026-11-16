@@ -396,3 +396,82 @@ test('run on a logged_out scenario opens and closes its own context', async () =
     await user.close();
   }
 });
+
+async function reliesOnDaemon(answers: Parameters<typeof createScriptedClient>[0]) {
+  const dir = tmp('daemon-relies');
+  const file = path.join(dir, 'suite.yaml');
+  fs.writeFileSync(file, `topic: Relies
+base_url: ${server.url}/
+scenarios:
+  - id: R1
+    title: Two steps
+    start: /thanks.html
+    steps: [One, Two]
+    expected: Thanks
+    relies_on:
+      - {what: the first page is shown, after_step: 1}
+      - {what: the last page is shown}
+  - id: R2
+    title: No checkpoint yet
+    start: /thanks.html
+    steps: [One, Two]
+    expected: Thanks
+    relies_on:
+      - {what: the first page is shown, after_step: 1}
+`);
+  const env = { ...process.env, VISUAL_QA_OUTPUT_DIR: dir };
+  const runDir = createRunFolder(loadSuite(file), 'session-x', new Date(), env);
+  const d = await startDaemon(runDir, { jev: createScriptedClient(answers), navTimeoutMs: 5000, actionTimeoutMs: 3000, settleMs: 50, env: chromeEnv });
+  return { d, runDir };
+}
+
+test('evidence lists relies_on files: checkpoint for after_step items, final page otherwise', async () => {
+  const { d, runDir } = await reliesOnDaemon([{ operation: 'done' }, { operation: 'done' }]);
+  try {
+    assert.equal((await cmd(d, 'run', { id: 'R1' })).body.result.status, 'completed');
+    const ev = (await cmd(d, 'evidence', { id: 'R1' })).body.result;
+    assert.equal(ev.needsJudge, true);
+    assert.equal(ev.scope, 'full');
+    assert.equal(ev.expected, 'Thanks');
+    assert.equal(ev.reliesOn.length, 2);
+    assert.deepEqual(ev.reliesOn[0], {
+      what: 'the first page is shown',
+      viewportShot: path.join(runDir, 'scenarios', 'R1', 'checkpoint-1.jpg'),
+      textFile: path.join(runDir, 'scenarios', 'R1', 'checkpoint-1.txt'),
+    });
+    assert.ok(fs.existsSync(ev.reliesOn[0].viewportShot));
+    assert.equal(ev.reliesOn[1].viewportShot, ev.viewportShot);
+    assert.equal(ev.reliesOn[1].textFile, ev.textFile);
+    const run = JSON.parse(fs.readFileSync(path.join(runDir, 'run.json'), 'utf8'));
+    assert.equal(run.scenarios.R1.checkpoints.length, 1);
+  } finally {
+    await d.close();
+  }
+});
+
+test('evidence for an app_problem give-up with a checkpoint is relies_on_only; without one, needsJudge is false', async () => {
+  const { d, runDir } = await reliesOnDaemon([{ operation: 'done' }, { operation: 'click', target: 1, opConfidence: 0.2 }]);
+  try {
+    const r1 = await cmd(d, 'run', { id: 'R1' });
+    assert.equal(r1.body.result.status, 'handback');
+    await cmd(d, 'giveup', { id: 'R1', class: 'app_problem', reason: 'the page is broken' });
+    const ev = (await cmd(d, 'evidence', { id: 'R1' })).body.result;
+    assert.equal(ev.needsJudge, true);
+    assert.equal(ev.scope, 'relies_on_only');
+    assert.equal(ev.expected, undefined);
+    assert.equal(ev.reliesOn.length, 1);
+    assert.equal(ev.reliesOn[0].what, 'the first page is shown');
+    assert.ok(fs.existsSync(ev.reliesOn[0].viewportShot));
+
+    await cmd(d, 'giveup', { id: 'R2', class: 'app_problem', reason: 'broken before any checkpoint' });
+    const none = (await cmd(d, 'evidence', { id: 'R2' })).body;
+    assert.equal(none.ok, true);
+    assert.equal(none.result.needsJudge, false);
+    assert.equal(none.result.scope, null);
+    assert.ok(none.result.reason);
+    const run = JSON.parse(fs.readFileSync(path.join(runDir, 'run.json'), 'utf8'));
+    assert.deepEqual(run.scenarios.R2.checkpoints, []);
+  } finally {
+    await d.close();
+  }
+});

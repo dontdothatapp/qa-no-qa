@@ -84,15 +84,20 @@ export function computeVerdict(i: {
   // rule A: confirmed = judge entry with the same (normalized) what, met, evidence present, text quotes found on that page
   const quoteProblems: string[] = [];
   const unconfirmed: string[] = [];
+  const isEmpty = (e: string) => !normalizeForQuote(e);
   for (const item of i.reliesOn) {
     const key = normalizeForQuote(item.what);
-    const r = i.judge?.reliesOn.find((e) => normalizeForQuote(e.what) === key);
-    if (!r || r.status !== 'met' || !r.evidence.trim()) {
-      unconfirmed.push(item.what);
-    } else if (r.source === 'text' && !quoteFoundOn(item.pageText, r.evidence)) {
-      quoteProblems.push(r.evidence);
-      unconfirmed.push(item.what);
+    // every judge entry for this item must confirm it; a contradicting duplicate means unconfirmed
+    const entries = (i.judge?.reliesOn ?? []).filter((e) => normalizeForQuote(e.what) === key);
+    let confirmed = entries.length > 0;
+    for (const r of entries) {
+      if (r.status !== 'met' || isEmpty(r.evidence)) confirmed = false;
+      else if (r.source === 'text' && !quoteFoundOn(item.pageText, r.evidence)) {
+        confirmed = false;
+        if (!quoteProblems.includes(r.evidence)) quoteProblems.push(r.evidence);
+      }
     }
+    if (!confirmed) unconfirmed.push(item.what);
   }
 
   if (i.gaveUp?.class === 'app_problem') {
@@ -113,10 +118,10 @@ export function computeVerdict(i: {
     const first = points.find((p) => p.status === 'unclear')!;
     return { verdict: 'needs_review', reason: i.judge.reason || `unclear: ${first.point}`, quoteProblems: [] };
   }
-  const bare = points.find((p) => !p.evidence.trim());
+  const bare = points.find((p) => isEmpty(p.evidence));
   if (bare) return { verdict: 'needs_review', reason: `no evidence given for: ${bare.point}`, quoteProblems: [] };
   const keyQuoteProblems = points
-    .filter((p) => p.status === 'met' && p.source === 'text' && p.evidence.trim() && !quoteFoundOn(i.pageText, p.evidence))
+    .filter((p) => p.status === 'met' && p.source === 'text' && !isEmpty(p.evidence) && !quoteFoundOn(i.pageText, p.evidence))
     .map((p) => p.evidence);
   if (keyQuoteProblems.length) {
     return { verdict: 'needs_review', reason: `judge quoted text that is not on the page: "${keyQuoteProblems[0]}"`, quoteProblems: keyQuoteProblems };

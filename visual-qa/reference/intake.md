@@ -7,7 +7,7 @@ The person pastes whatever checklist they have. Turn it into `~/QA/scenarios/<to
 - **Background vs checks.** Facts, IDs, URLs, "I'm logged in as...", "the flag is ON" are background: put them in `notes`. Lines that say what should be true are checks.
 - **Site.** Take `base_url` from the paste. If there is none, ask.
 - **One check = one scenario.** A line that covers several pages ("apply / profile / talk") splits into one scenario per page. `source` is the original line, verbatim. `title` is short.
-- **Untestable checks** (an email, a backend job, anything no page shows) still get a scenario, so they stay visible in the report: any one-line step, the right group, and `expected` = what was meant. List each as "won't test: ..." in your first message, and run `qa skip <id> --reason "..."` for it right after `start`.
+- **Untestable checks** (an email, a backend job, anything no page shows) still get a scenario, so they stay visible in the report: any one-line step, the right group, and `expected` = what was meant. List each once as "won't test: ...": in your questions message if you ask any (section 4), otherwise with the start line. Run `qa skip <id> --reason "..."` for it right after `start`.
 
 ## 2. Write each scenario
 
@@ -77,5 +77,3 @@ scenarios:
 ```
 
 A signed-out check would add `logged_out: true` to its scenario and a `group`.
-
-After writing the files, tell the person the counts, the first group, and any "won't test" lines.

@@ -19,7 +19,10 @@ Input: `$ARGUMENTS`
 ## 1. Preflight
 
 Run `node ${CLAUDE_PLUGIN_ROOT}/bin/setup.ts --check`.
-- `ok` is false → Read `${CLAUDE_PLUGIN_ROOT}/skills/setup/SKILL.md`, follow its steps 1–2 until `ok`, relay its `notes` once, then continue here.
+- `ok` is false → Read `${CLAUDE_PLUGIN_ROOT}/skills/setup/SKILL.md` and follow its steps 1–2 until `ok`:
+  - In that file the plugin folder is written as a `CLAUDE_PLUGIN_ROOT` variable; use `${CLAUDE_PLUGIN_ROOT}` in its place.
+  - Skip its step 1 if `--check` printed JSON (Node already works).
+  - Relay its `notes` once, then continue here. If setup stops without `ok`, stop here too.
 - The `anthropic_api_key` item is not ok → say in one line that Claude Code may be billing the API instead of their subscription (`/status` shows which), and ask whether to continue. Wait for the answer.
 
 ## 2. Continue a paused run
@@ -27,15 +30,15 @@ Run `node ${CLAUDE_PLUGIN_ROOT}/bin/setup.ts --check`.
 Only when the person asks to continue (or the input is `continue`):
 - If this chat has a run paused between groups, treat it as "go" (step 5).
 - Otherwise run `qa.ts remaining`. `{"found":false}` → say there is no paused run to continue and ask for their checklist.
-- Otherwise tell them how many checks are left and the first group's `needs`, as an instruction, then "say go, or skip". Wait. That answer is the pause before the first group (step 5).
-- Read `<testsFile>` (takeovers need its YAML blocks and `notes`). Then do step 4 with this start command: `qa.ts start <testsFile> --session ${CLAUDE_SESSION_ID} --only <every remaining id, comma-separated> --continues <runDir>`.
+- Otherwise Read `<testsFile>` (takeovers need its YAML blocks and `notes`). Do step 4, saying in its message how many checks are left, with this start command: `qa.ts start <testsFile> --session ${CLAUDE_SESSION_ID} --only <every remaining id, comma-separated> --continues <runDir>`.
+- Then do step 5, pausing before the first group too.
 
 ## 3. Intake
 
-- The input is a path to a `.yaml`/`.yml` file → use that file and go to step 4.
+- The input is a path to a `.yaml`/`.yml` file → Read it (takeovers need its YAML blocks and `notes`) and go to step 4.
 - Nothing was pasted → ask them to paste their checklist.
 - Otherwise Read `${CLAUDE_PLUGIN_ROOT}/reference/intake.md` and follow it. It says what to ask (all in one numbered message, only if needed) and which files to write.
-- Then send one line: `Running N checks in M groups. First group: <needs>.` (a single group: `Running N checks.`), plus any "won't test: …" lines.
+- Then send one line: `Running N checks in M groups. First group: <needs>.` (a single group: `Running N checks.`), plus the "won't test: …" lines unless your questions message already listed them.
 
 ## 4. Start
 
@@ -44,15 +47,15 @@ Only when the person asks to continue (or the input is `continue`):
 3. For each "won't test" check: `qa.ts skip <id> --reason "<why it can't be tested>"`.
 
 Start errors:
-- "a run is already active" → ask whether to end that run (`qa.ts stop`), then start again.
-- Chrome connection errors ("did not allow the connection", "refused the connection", "not reachable") → tell them in plain words: click **Allow** when Chrome asks, or switch remote debugging back on (setup step); then start again. Do not change the test file.
+- "a run is already active" → ask whether to end that run (`qa.ts stop`), then start again. If they say no, stop here.
+- Chrome connection errors ("did not allow the connection", "refused the connection", "not reachable", "remote debugging is off") → tell them in plain words what to do: click **Allow** when Chrome asks, or switch remote debugging on (`node ${CLAUDE_PLUGIN_ROOT}/bin/setup.ts --open-chrome` opens the page). When they are ready, start again. Do not change the test file.
 - "invalid scenario file" or another error → fix the file yourself (format: `${CLAUDE_PLUGIN_ROOT}/reference/scenario-format.md`) and start again.
 
 ## 5. Each group, in order
 
-1. **Pause** before every group except the first:
-   - Judge the tests finished so far (step 6), then run `qa.ts report`.
-   - Send: `Next N checks: <needs, as an instruction>. Say go when ready, or skip.`, with the report so far as a link. Wait.
+1. **Pause** before every group except the first (in a continued run, before the first too):
+   - Judge the tests finished so far (step 6), then run `qa.ts report` (skip both if none has finished).
+   - Send: `Next N checks: <needs, as an instruction>. Say go when ready, or skip.`, with the report so far as a link if there is one. Wait.
    - skip → `qa.ts skip <id> --reason "skipped at the pause"` for each test in the group; go to the next group.
    - stop, or "that's enough" → step 7.
 2. For each test id in the group: `qa.ts run <id>`.
@@ -67,6 +70,7 @@ Start errors:
      - It replies with one JSON line. Do not open its screenshots yourself.
 3. Runner errors, for any command:
    - The error text contains `qa reopen` (the connection to Chrome ended, e.g. after a long pause) → tell them to click **Allow** in Chrome again, run `qa.ts reopen`, then repeat the command that failed.
+   - `qa.ts reopen` itself fails (Allow not clicked in time, remote debugging is off, "no run to reopen") → do not retry. Tell them in plain words, run `qa.ts report` and `qa.ts stop`, and send the summary (step 7.3).
    - The runner prints `{"error": ...}` for a test instead of a status → record it with `qa.ts giveup <id> --class tooling_or_environment --reason "runner error: <message>"` and go on with the next test.
 
 ## 6. Judge

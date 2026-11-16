@@ -104,6 +104,58 @@ test('setup skill never asks for the key in chat', () => {
   assert.match(body, /never ask for the key in chat/i);
 });
 
+const section = (body: string, heading: string) => {
+  const start = body.indexOf(heading);
+  assert.ok(start >= 0, heading);
+  const next = body.indexOf('\n## ', start + heading.length);
+  return body.slice(start, next < 0 ? undefined : next);
+};
+
+test('test skill pins the start flags for new and continued runs', () => {
+  const { body } = split(read(TEST_SKILL));
+  assert.match(body, /`qa\.ts start <file> --session \$\{CLAUDE_SESSION_ID\}`/);
+  assert.match(body, /`qa\.ts start <testsFile> --session \$\{CLAUDE_SESSION_ID\} --only <[^>]+> --continues <runDir>`/);
+});
+
+test('test skill sends the Allow line before qa.ts start, and judges + reports before the pause message', () => {
+  const { body } = split(read(TEST_SKILL));
+  const start = section(body, '## 4. Start');
+  assert.ok(start.indexOf('**Allow**') >= 0 && start.indexOf('**Allow**') < start.indexOf('qa.ts start'), 'Allow line before start');
+  const groups = section(body, '## 5.');
+  const pause = groups.indexOf('Say go');
+  assert.ok(pause > 0, 'pause message');
+  assert.ok(groups.indexOf('Judge the tests finished so far') >= 0 && groups.indexOf('Judge the tests finished so far') < pause, 'judge before pause');
+  assert.ok(groups.indexOf('qa.ts report') >= 0 && groups.indexOf('qa.ts report') < pause, 'report before pause');
+});
+
+test('continue starts the run before offering go/skip, and a failed reopen ends the run instead of looping', () => {
+  const { body } = split(read(TEST_SKILL));
+  const cont = section(body, '## 2. Continue');
+  assert.doesNotMatch(cont, /say go, or skip/i);
+  assert.match(cont, /before the first group too/);
+  assert.match(body, /`qa\.ts reopen` itself fails/);
+  assert.match(body, /remote debugging is off/);
+});
+
+test('test skill tells Claude how to resolve the plugin folder in the setup file it reads', () => {
+  const { body } = split(read(TEST_SKILL));
+  assert.match(body, /`CLAUDE_PLUGIN_ROOT` variable/);
+  assert.match(body, /Skip its step 1/);
+});
+
+test('setup skill waits for Chrome with a number of seconds and stops instead of looping', () => {
+  const { body } = split(read(SETUP_SKILL));
+  assert.match(body, /--wait-chrome \d+/);
+  assert.doesNotMatch(body, /--wait-chrome(?! \d)/);
+  assert.match(body, /same `detail`/);
+});
+
+test('scenario format and intake examples use block-style list items, never {...}', () => {
+  for (const f of ['reference/scenario-format.md', 'reference/intake.md']) {
+    for (const block of read(f).matchAll(/```yaml\n([\s\S]*?)```/g)) assert.doesNotMatch(block[1], /^\s*- \{/m, f);
+  }
+});
+
 test('chrome-mode wording: sign-in advice, connection errors, tabs come to the front', () => {
   assert.match(read('reference/takeover.md'), /sign in to the site in your Chrome/);
   const { body } = split(read(TEST_SKILL));

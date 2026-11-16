@@ -10,8 +10,10 @@ allow_hosts: [staging.example.com]      # optional (default: the base_url host);
 judge_model: sonnet                     # optional: sonnet | haiku | opus
 notes: "Test IDs: 123, 456"             # optional: free text from the checklist, shown in the report
 groups:                                 # optional: batches that need the same setup, run one after another
-  - {id: flag-on, needs: Feature flag ON}
-  - {id: flag-off, needs: Feature flag OFF}
+  - id: flag-on
+    needs: Feature flag ON
+  - id: flag-off
+    needs: Feature flag OFF
 scenarios:
   - id: CO-01                           # letters, digits, - and _ only; unique
     title: Guest can reach the payment step
@@ -25,8 +27,9 @@ scenarios:
       - Fill the shipping form
       - Click "Continue"
     relies_on:                          # optional: conditions the page can show, so the report can say if one was missing
-      - {what: The cart holds 1 item, after_step: 2}    # 1-based step after which it is visible
-      - {what: Order summary is shown}                  # no after_step = on the final page
+      - what: The cart holds 1 item
+        after_step: 2                   # 1-based step after which it is visible
+      - what: Order summary is shown    # no after_step = on the final page
     values:                             # optional: text to type, by field label
       Full name: Test User
       Postcode: "10115"

@@ -25,9 +25,12 @@ Run `node ${CLAUDE_PLUGIN_ROOT}/bin/setup.ts --check`. While `next` is set:
 2. When the fix is theirs, wait until they say done.
 3. Run `--check` again.
 
+Stop and tell the person plainly what is still wrong when a command fails (it prints `{"error"` or no JSON), or when the same item comes back with the same `detail` after its fix. They can run setup again later.
+
 Items:
 - **packages** → run `next.command` (it runs `npm ci --omit=dev` in `${CLAUDE_PLUGIN_ROOT}`; about a minute, so give it a long timeout), then re-check.
-- **typesafe_key** → run `node ${CLAUDE_PLUGIN_ROOT}/bin/setup.ts --open-key-file`. It opens TypeSafe's key page in their browser and the key file in TextEdit. Say: "Copy your key from the TypeSafe page, paste it after `TYPESAFE_API_KEY=` in the TextEdit window, save, and tell me when done."
+- **typesafe_key** with `next.command` set → run `node ${CLAUDE_PLUGIN_ROOT}/bin/setup.ts --open-key-file`. It opens TypeSafe's key page in their browser and the key file in TextEdit. Say: "Copy your key from the TypeSafe page, paste it after `TYPESAFE_API_KEY=` in the TextEdit window, save, and tell me when done."
+  - `next.command` is null → TypeSafe couldn't be reached just now. Tell them to check their internet connection and run setup again later, and stop.
   - Never ask for the key in chat, and never read or print the key file yourself; only `--open-key-file` opens it, for them.
   - If they paste the key into chat anyway, do not repeat it back. Ask them to put it in the file instead.
   - The re-check tests the key. If TypeSafe did not accept it, the next fix says so; run `--open-key-file` again.

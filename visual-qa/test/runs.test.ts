@@ -7,12 +7,12 @@ import { findLatestUnfinishedRun } from '../src/runs.ts';
 
 type Status = 'not_started' | 'completed' | 'skipped';
 
-function fakeRun(root: string, name: string, startedAt: string, statuses: Record<string, Status>, groups: Array<{ id: string; needs: string }> = [], groupOf: Record<string, string> = {}): string {
+function fakeRun(root: string, name: string, startedAt: string, statuses: Record<string, Status>, groups: Array<{ id: string; needs: string }> = [], groupOf: Record<string, string> = {}, continuesFrom: string | null = null): string {
   const dir = path.join(root, name);
   fs.mkdirSync(dir, { recursive: true });
   const scenarios = Object.keys(statuses).map((id) => ({ id, title: id, start: '/', steps: ['x'], values: {}, expected: 'y', group: groupOf[id] ?? null, source: null, reliesOn: [], loggedOut: false }));
   const records = Object.fromEntries(Object.entries(statuses).map(([id, status]) => [id, { status }]));
-  fs.writeFileSync(path.join(dir, 'run.json'), JSON.stringify({ suite: { topic: name, baseUrl: 'https://a.example', groups, scenarios, sourcePath: '/x' }, sessionId: null, startedAt, madeUpCache: {}, scenarios: records }));
+  fs.writeFileSync(path.join(dir, 'run.json'), JSON.stringify({ suite: { topic: name, baseUrl: 'https://a.example', groups, scenarios, sourcePath: '/x' }, sessionId: null, startedAt, continuesFrom, madeUpCache: {}, scenarios: records }));
   return dir;
 }
 
@@ -36,4 +36,16 @@ test('findLatestUnfinishedRun returns null when nothing is unfinished or the fol
   fakeRun(root, 'done', '2026-01-01T10:00:00Z', { A: 'completed' });
   assert.equal(findLatestUnfinishedRun(root), null);
   assert.equal(findLatestUnfinishedRun(path.join(root, 'missing')), null);
+});
+
+test('findLatestUnfinishedRun skips a run that a later run continued, and offers the continuing run instead (R12)', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'runs-'));
+  const a = fakeRun(root, 'a', '2026-01-01T10:00:00Z', { A1: 'completed', A2: 'not_started', A3: 'not_started' });
+  fakeRun(root, 'b', '2026-01-02T10:00:00Z', { A2: 'completed', A3: 'skipped' }, [], {}, a);
+  assert.equal(findLatestUnfinishedRun(root), null, 'b finished what a left');
+
+  const root2 = fs.mkdtempSync(path.join(os.tmpdir(), 'runs-'));
+  const a2 = fakeRun(root2, 'a', '2026-01-01T10:00:00Z', { A1: 'completed', A2: 'not_started', A3: 'not_started' });
+  const b2 = fakeRun(root2, 'b', '2026-01-02T10:00:00Z', { A2: 'completed', A3: 'not_started' }, [], {}, a2 + path.sep);
+  assert.deepEqual(findLatestUnfinishedRun(root2), { runDir: b2, testsFile: path.join(b2, 'tests.yaml'), groups: [{ id: 'default', needs: null, scenarios: ['A3'] }] });
 });

@@ -85,6 +85,26 @@ export type DaemonOptions = RunnerTimeouts & {
 
 class CommandError extends Error {}
 
+/** Records a test as skipped (run.json is written by the caller); refused once the test has started. */
+function applySkip(run: RunFile, events: EventLog, id: unknown, reason: unknown, startedHere: boolean): { id: string; status: 'skipped'; skipReason: string } {
+  const s = run.suite.scenarios.find((x) => x.id === id);
+  if (!s) throw new CommandError(`unknown scenario id "${String(id)}"`);
+  const why = String(reason ?? '').trim();
+  if (!why) throw new CommandError('--reason is required');
+  if (startedHere || (run.scenarios[s.id] && run.scenarios[s.id].status !== 'not_started')) throw new CommandError(`scenario ${s.id} already started`);
+  events.append({ type: 'skip', id: s.id, reason: why });
+  run.scenarios[s.id] = { ...emptyRecord(), status: 'skipped', skipReason: why };
+  return { id: s.id, status: 'skipped', skipReason: why };
+}
+
+/** `qa skip` when no daemon is running (e.g. after a long pause): the same record and event, written straight to the run folder. */
+export function skipWithoutDaemon(runDir: string, id: string, reason: unknown): { id: string; status: 'skipped'; skipReason: string } {
+  const run = readRunFile(runDir);
+  const result = applySkip(run, openEventLog(path.join(runDir, 'events.jsonl')), id, reason, false);
+  writeRunFile(runDir, run);
+  return result;
+}
+
 const isFinished = (status: ScenarioRecord['status']) => status === 'completed' || status === 'gave_up' || status === 'skipped';
 
 export async function startDaemon(runDir: string, opts: DaemonOptions = {}): Promise<{ port: number; token: string; close(): Promise<void> }> {
@@ -308,14 +328,9 @@ export async function startDaemon(runDir: string, opts: DaemonOptions = {}): Pro
     },
 
     async skip(a) {
-      const s = scenarioOf(a.id);
-      const reason = String(a.reason ?? '').trim();
-      if (!reason) throw new CommandError('--reason is required');
-      if (states.has(s.id) || (run.scenarios[s.id] && run.scenarios[s.id].status !== 'not_started')) throw new CommandError(`scenario ${s.id} already started`);
-      events.append({ type: 'skip', id: s.id, reason });
-      run.scenarios[s.id] = { ...emptyRecord(), status: 'skipped', skipReason: reason };
+      const result = applySkip(run, events, a.id, a.reason, states.has(String(a.id)));
       writeRunFile(runDir, run);
-      return { id: s.id, status: 'skipped', skipReason: reason };
+      return result;
     },
 
     async evidence(a) {

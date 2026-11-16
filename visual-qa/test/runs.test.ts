@@ -5,11 +5,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { findLatestUnfinishedRun } from '../src/runs.ts';
 
-type Status = 'not_started' | 'completed' | 'skipped';
+type Status = 'not_started' | 'running' | 'handback' | 'completed' | 'gave_up' | 'skipped';
 
-function fakeRun(root: string, name: string, startedAt: string, statuses: Record<string, Status>, groups: Array<{ id: string; needs: string }> = [], groupOf: Record<string, string> = {}, continuesFrom: string | null = null): string {
+function fakeRun(root: string, name: string, startedAt: string, statuses: Record<string, Status>, groups: Array<{ id: string; needs: string }> = [], groupOf: Record<string, string> = {}, continuesFrom: string | null = null, testsFile = true): string {
   const dir = path.join(root, name);
   fs.mkdirSync(dir, { recursive: true });
+  if (testsFile) fs.writeFileSync(path.join(dir, 'tests.yaml'), 'topic: x\n');
   const scenarios = Object.keys(statuses).map((id) => ({ id, title: id, start: '/', steps: ['x'], values: {}, expected: 'y', group: groupOf[id] ?? null, source: null, reliesOn: [], loggedOut: false }));
   const records = Object.fromEntries(Object.entries(statuses).map(([id, status]) => [id, { status }]));
   fs.writeFileSync(path.join(dir, 'run.json'), JSON.stringify({ suite: { topic: name, baseUrl: 'https://a.example', groups, scenarios, sourcePath: '/x' }, sessionId: null, startedAt, continuesFrom, madeUpCache: {}, scenarios: records }));
@@ -48,4 +49,20 @@ test('findLatestUnfinishedRun skips a run that a later run continued, and offers
   const a2 = fakeRun(root2, 'a', '2026-01-01T10:00:00Z', { A1: 'completed', A2: 'not_started', A3: 'not_started' });
   const b2 = fakeRun(root2, 'b', '2026-01-02T10:00:00Z', { A2: 'completed', A3: 'not_started' }, [], {}, a2 + path.sep);
   assert.deepEqual(findLatestUnfinishedRun(root2), { runDir: b2, testsFile: path.join(b2, 'tests.yaml'), groups: [{ id: 'default', needs: null, scenarios: ['A3'] }] });
+});
+
+test('findLatestUnfinishedRun also offers tests cut off mid-run (running or handback), not finished ones', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'runs-'));
+  const dir = fakeRun(root, 'cut', '2026-01-01T10:00:00Z', { A: 'completed', B: 'running', C: 'handback', D: 'gave_up', E: 'skipped', F: 'not_started' });
+  assert.deepEqual(findLatestUnfinishedRun(root), { runDir: dir, testsFile: path.join(dir, 'tests.yaml'), groups: [{ id: 'default', needs: null, scenarios: ['B', 'C', 'F'] }] });
+});
+
+test('findLatestUnfinishedRun skips folders without tests.yaml (older-style runs)', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'runs-'));
+  const withFile = fakeRun(root, 'with', '2026-01-01T10:00:00Z', { A: 'not_started' });
+  fakeRun(root, 'older-style', '2026-01-02T10:00:00Z', { A: 'not_started' }, [], {}, null, false);
+  assert.equal(findLatestUnfinishedRun(root)?.runDir, withFile);
+  const onlyOld = fs.mkdtempSync(path.join(os.tmpdir(), 'runs-'));
+  fakeRun(onlyOld, 'older-style', '2026-01-02T10:00:00Z', { A: 'not_started' }, [], {}, null, false);
+  assert.equal(findLatestUnfinishedRun(onlyOld), null);
 });

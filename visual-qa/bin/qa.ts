@@ -8,7 +8,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
-import { createRunFolder, startDaemon } from '../src/daemon.ts';
+import { createRunFolder, skipWithoutDaemon, startDaemon } from '../src/daemon.ts';
 import { clearCurrentRun, DaemonUnreachable, isOurDaemon, readCurrentRun, sendCommand, writeCurrentRun } from '../src/daemon-client.ts';
 import { writeReport } from '../src/report.ts';
 import { CHROME_OFF_MESSAGE, findChromeEndpoint } from '../src/chrome.ts';
@@ -84,8 +84,14 @@ async function start(positionals: string[], values: Record<string, unknown>): Pr
   if (!findChromeEndpoint()) throw new Error(CHROME_OFF_MESSAGE);
   const continuesFrom = typeof values.continues === 'string' ? path.resolve(values.continues) : null;
   const runDir = createRunFolder(suite, typeof values.session === 'string' ? values.session : null, new Date(), process.env, continuesFrom);
-  copyTestFiles(file, runDir);
-  await spawnDaemon(runDir, chromeDeadlineMs());
+  try {
+    copyTestFiles(file, runDir);
+    await spawnDaemon(runDir, chromeDeadlineMs());
+  } catch (e) {
+    // nothing has run (e.g. Allow was not clicked in time): leave no folder for "continue" to offer later
+    fs.rmSync(runDir, { recursive: true, force: true });
+    throw e;
+  }
   return { runDir, scenarios: suite.scenarios.map((s) => s.id), groups: groupOrder(suite), judgeModel: suite.judgeModel };
 }
 
@@ -112,6 +118,8 @@ async function spawnDaemon(runDir: string, chromeDeadlineMs: number): Promise<vo
     d = await waitFor(path.join(runDir, 'daemon.json'), state, chromeDeadlineMs);
   } catch (e) {
     try { if (child.pid) process.kill(child.pid, 'SIGTERM'); } catch { /* already gone */ }
+    // wait (briefly) until it is gone, so it cannot write into a run folder the caller removes
+    for (let i = 0; i < 30 && !state.exited; i++) await new Promise((r) => setTimeout(r, 100));
     throw e;
   }
   writeCurrentRun({ runDir, port: d.port, token: d.token, pid: d.pid });
@@ -193,9 +201,18 @@ export async function main(argv: string[]): Promise<number> {
       case 'giveup':
         print(await sendCommand('giveup', { id: needId(positionals, 'giveup <id> --class <c> --reason <text>'), class: values.class, reason: values.reason }));
         return 0;
-      case 'skip':
-        print(await sendCommand('skip', { id: needId(positionals, 'skip <id> --reason <text>'), reason: values.reason }));
+      case 'skip': {
+        const id = needId(positionals, 'skip <id> --reason <text>');
+        try {
+          print(await sendCommand('skip', { id, reason: values.reason }));
+        } catch (e) {
+          // after a long pause the daemon may be gone: a skip opens nothing, so it needs no new Allow click
+          const current = readCurrentRun();
+          if (!(e instanceof DaemonUnreachable) || !current || isOurDaemon(current.pid)) throw e;
+          print(skipWithoutDaemon(current.runDir, id, values.reason));
+        }
         return 0;
+      }
       case 'reopen':
         print(await reopen(values));
         return 0;

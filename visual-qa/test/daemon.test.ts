@@ -8,6 +8,7 @@ import { isAlive } from '../src/daemon-client.ts';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { startDaemon, createRunFolder } from '../src/daemon.ts';
+import { findLatestUnfinishedRun } from '../src/runs.ts';
 import { createScriptedClient } from '../src/jev-client.ts';
 import { loadSuite } from '../src/scenarios.ts';
 import { connectChrome } from '../src/chrome.ts';
@@ -630,6 +631,66 @@ test('after the daemon stops, run says to reopen; reopen reconnects and does not
     const second = await qa(['run', 'S2'], env);
     assert.equal(second.code, 0, second.out);
     assert.equal(JSON.parse(second.out).status, 'completed');
+  } finally {
+    await qa(['stop'], env);
+  }
+});
+
+test('a failed start removes its run folder, so continue never offers it; a failed reopen keeps the run', async () => {
+  const dir = tmp('failed-start');
+  const fake = path.join(dir, 'jev.json');
+  fs.writeFileSync(fake, JSON.stringify([{ operation: 'done' }]));
+  const out = path.join(dir, 'out');
+  const env = cliEnv(path.join(dir, 'state'), out, fake);
+  const tooSlow = { ...env, VISUAL_QA_DAEMON_START_TIMEOUT_MS: '1' }; // stands in for Allow not clicked in time
+  const failed = await qa(['start', suiteFile(dir), '--session', 'x'], tooSlow);
+  assert.notEqual(failed.code, 0);
+  assert.deepEqual(fs.existsSync(out) ? fs.readdirSync(out) : [], [], 'no run folder left behind');
+  assert.equal(findLatestUnfinishedRun(out), null);
+
+  const s = JSON.parse((await qa(['start', suiteFile(dir), '--session', 'x'], env)).out);
+  try {
+    assert.equal(JSON.parse((await qa(['run', 'S1'], env)).out).status, 'completed');
+    const current = JSON.parse(fs.readFileSync(path.join(dir, 'state', 'current-run.json'), 'utf8'));
+    process.kill(current.pid, 'SIGKILL');
+    await new Promise((res) => setTimeout(res, 500));
+    const re = await qa(['reopen'], tooSlow);
+    assert.notEqual(re.code, 0);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(s.runDir, 'run.json'), 'utf8')).scenarios.S1.status, 'completed', 'the run and its results stay');
+  } finally {
+    await qa(['stop'], env);
+  }
+});
+
+test('skip works without a live daemon: it writes run.json and the skip event; a started test is refused', async () => {
+  const dir = tmp('skip-offline');
+  const fake = path.join(dir, 'jev.json');
+  fs.writeFileSync(fake, JSON.stringify([{ operation: 'done' }, { operation: 'done' }]));
+  const env = cliEnv(path.join(dir, 'state'), path.join(dir, 'out'), fake);
+  const s = JSON.parse((await qa(['start', suiteFile(dir), '--session', 'x'], env)).out);
+  try {
+    assert.equal(JSON.parse((await qa(['run', 'S1'], env)).out).status, 'completed');
+    const current = JSON.parse(fs.readFileSync(path.join(dir, 'state', 'current-run.json'), 'utf8'));
+    process.kill(current.pid, 'SIGKILL');
+    await new Promise((res) => setTimeout(res, 500));
+
+    const ok = await qa(['skip', 'S2', '--reason', 'skipped at the pause'], env);
+    assert.equal(ok.code, 0, ok.out);
+    assert.deepEqual(JSON.parse(ok.out), { id: 'S2', status: 'skipped', skipReason: 'skipped at the pause' });
+    const rec = JSON.parse(fs.readFileSync(path.join(s.runDir, 'run.json'), 'utf8')).scenarios.S2;
+    assert.deepEqual(rec, {
+      status: 'skipped', currentStep: 0, jevActions: 0, claudeActions: 0, elapsedMs: 0, handbacks: [], madeUp: {}, gaveUp: null, evidence: null, checkpoints: [], skipReason: 'skipped at the pause',
+    });
+    const last = JSON.parse(fs.readFileSync(path.join(s.runDir, 'events.jsonl'), 'utf8').trim().split('\n').at(-1)!);
+    assert.deepEqual([last.type, last.id, last.reason], ['skip', 'S2', 'skipped at the pause']);
+
+    const refused = await qa(['skip', 'S1', '--reason', 'x'], env);
+    assert.notEqual(refused.code, 0);
+    assert.equal(JSON.parse(refused.out).error, 'scenario S1 already started');
+    assert.match(JSON.parse((await qa(['skip', 'S3'], env)).out).error, /--reason/);
+
+    assert.equal((await qa(['reopen'], env)).code, 0);
+    assert.equal(JSON.parse((await qa(['run', 'S2'], env)).out).status, 'skipped', 'a reopened daemon keeps the skip');
   } finally {
     await qa(['stop'], env);
   }

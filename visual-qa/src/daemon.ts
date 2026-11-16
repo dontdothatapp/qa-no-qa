@@ -281,8 +281,8 @@ export async function startDaemon(runDir: string, opts: DaemonOptions = {}): Pro
 
     async giveup(a) {
       const s = scenarioOf(a.id);
-      const cls = a.class === 'app_problem' || a.class === 'tooling_or_environment' ? a.class : null;
-      if (!cls) throw new CommandError('--class must be app_problem or tooling_or_environment');
+      const cls = a.class === 'app_problem' || a.class === 'tooling_or_environment' || a.class === 'no_matching_page' ? a.class : null;
+      if (!cls) throw new CommandError('--class must be app_problem, tooling_or_environment or no_matching_page');
       const reason = String(a.reason ?? '').trim();
       if (!reason) throw new CommandError('--reason is required');
       const requested: GaveUp = { class: cls, reason };

@@ -38,7 +38,7 @@ export type ReportModel = {
   claude: ClaudeTokens;
 };
 
-const ORDER: Record<Verdict, number> = { fail: 0, needs_review: 1, pass: 2 };
+const ORDER: Record<Verdict, number> = { fail: 0, needs_review: 1, not_run: 2, pass: 3 };
 
 function readText(file: string | undefined | null): string {
   try {
@@ -53,7 +53,7 @@ export function buildReportModel(runDir: string, opts: { configDir?: string } = 
   const events = openEventLog(path.join(runDir, 'events.jsonl')).read();
   const jev = jevTokens(events);
   const claude = claudeTokens(run.sessionId ?? '', run.startedAt, opts.configDir);
-  const counts: Record<Verdict, number> = { pass: 0, fail: 0, needs_review: 0 };
+  const counts: Record<Verdict, number> = { pass: 0, fail: 0, needs_review: 0, not_run: 0 };
 
   const rows: ReportRow[] = run.suite.scenarios.map((s) => {
     const rec: ScenarioRecord = run.scenarios[s.id] ?? {
@@ -61,7 +61,7 @@ export function buildReportModel(runDir: string, opts: { configDir?: string } = 
     };
     const ev = rec.evidence;
     const judge = parseJudgeOutput(readText(path.join(runDir, 'scenarios', s.id, 'judge.json')) || 'null');
-    let v = computeVerdict({ judge, pageText: readText(ev?.textFile), gaveUp: rec.gaveUp });
+    let v = computeVerdict({ judge, pageText: readText(ev?.textFile), gaveUp: rec.gaveUp, skipped: null, reliesOn: [] });
     if (!rec.gaveUp && rec.status !== 'completed') {
       v = { verdict: 'needs_review', reason: rec.status === 'not_started' ? 'not run' : `run did not finish (${rec.status})`, quoteProblems: [] };
     }
@@ -97,8 +97,8 @@ const dur = (ms: number) => {
   const s = Math.round(ms / 1000);
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
 };
-const LABEL: Record<Verdict, string> = { pass: 'PASS', fail: 'FAIL', needs_review: 'NEEDS REVIEW' };
-const ICON: Record<Verdict, string> = { pass: '✓', fail: '✕', needs_review: '?' };
+const LABEL: Record<Verdict, string> = { pass: 'PASS', fail: 'FAIL', needs_review: 'NEEDS REVIEW', not_run: 'NOT RUN' };
+const ICON: Record<Verdict, string> = { pass: '✓', fail: '✕', needs_review: '?', not_run: '–' };
 const sumUsage = (u: Record<string, Usage4>) =>
   Object.values(u).reduce((a, x) => a + x.input + x.cacheWrite + x.cacheRead + x.output, 0);
 

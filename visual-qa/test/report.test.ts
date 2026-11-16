@@ -66,8 +66,8 @@ test('verdicts, ordering and summary', () => {
   const m = buildReportModel(syntheticRun('none'), { configDir: TRANSCRIPTS });
   assert.deepEqual(m.rows.map((r) => [r.id, r.verdict]), [['F1', 'fail'], ['G1', 'needs_review'], ['P1', 'pass']]);
   assert.equal(summaryLine(m.counts), '1 pass · 1 fail · 1 needs review');
-  assert.equal(summaryLine({ pass: 3, fail: 0, needs_review: 0 }), '3 pass');
-  assert.equal(summaryLine({ pass: 0, fail: 2, needs_review: 0 }), '0 pass · 2 fail');
+  assert.equal(summaryLine({ pass: 3, fail: 0, needs_review: 0, not_run: 0 }), '3 pass');
+  assert.equal(summaryLine({ pass: 0, fail: 2, needs_review: 0, not_run: 0 }), '0 pass · 2 fail');
   assert.deepEqual(m.rows.find((r) => r.id === 'P1')?.jevTokens, { input: 600, output: 100 });
 });
 

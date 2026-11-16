@@ -3,70 +3,70 @@ import assert from 'node:assert/strict';
 import { computeVerdict, parseJudgeOutput, normalizeForQuote, type JudgeOutput, type KeyPoint } from '../src/verdict.ts';
 
 const met = (point: string, evidence: string, source: KeyPoint['source'] = 'text'): KeyPoint => ({ point, status: 'met', evidence, source });
-const judge = (keyPoints: KeyPoint[], verdict: JudgeOutput['verdict'] = 'pass', reason = 'judge reason'): JudgeOutput => ({ keyPoints, verdict, reason });
+const judge = (keyPoints: KeyPoint[], verdict: JudgeOutput['verdict'] = 'pass', reason = 'judge reason', reliesOn: JudgeOutput['reliesOn'] = []): JudgeOutput => ({ keyPoints, reliesOn, verdict, reason });
 const PAGE = 'Pricing\nAnnual plan  SAVE    20%\n$96 per year';
 
 test('gave up as app_problem → fail with the gave-up reason', () => {
-  const v = computeVerdict({ judge: null, pageText: '', gaveUp: { class: 'app_problem', reason: 'Checkout button missing' } });
+  const v = computeVerdict({ judge: null, pageText: '', gaveUp: { class: 'app_problem', reason: 'Checkout button missing' }, skipped: null, reliesOn: [] });
   assert.deepEqual([v.verdict, v.reason], ['fail', 'Checkout button missing']);
 });
 
 test('gave up as tooling_or_environment → needs_review', () => {
-  assert.equal(computeVerdict({ judge: null, pageText: '', gaveUp: { class: 'tooling_or_environment', reason: 'captcha' } }).verdict, 'needs_review');
+  assert.equal(computeVerdict({ judge: null, pageText: '', gaveUp: { class: 'tooling_or_environment', reason: 'captcha' }, skipped: null, reliesOn: [] }).verdict, 'needs_review');
 });
 
 test('missing judge → needs_review', () => {
-  const v = computeVerdict({ judge: null, pageText: PAGE, gaveUp: null });
+  const v = computeVerdict({ judge: null, pageText: PAGE, gaveUp: null, skipped: null, reliesOn: [] });
   assert.deepEqual([v.verdict, v.reason], ['needs_review', 'judge output missing or invalid']);
 });
 
 test('no key points → needs_review', () => {
-  assert.equal(computeVerdict({ judge: judge([]), pageText: PAGE, gaveUp: null }).verdict, 'needs_review');
+  assert.equal(computeVerdict({ judge: judge([]), pageText: PAGE, gaveUp: null, skipped: null, reliesOn: [] }).verdict, 'needs_review');
 });
 
 test('any not_met → fail, even if the judge said pass', () => {
   const v = computeVerdict({
     judge: judge([met('price', '$96'), { point: 'badge', status: 'not_met', evidence: 'no badge visible', source: 'screenshot' }], 'pass', 'Badge missing'),
-    pageText: PAGE, gaveUp: null,
+    pageText: PAGE, gaveUp: null, skipped: null, reliesOn: [],
   });
   assert.deepEqual([v.verdict, v.reason], ['fail', 'Badge missing']);
 });
 
 test('any unclear → needs_review', () => {
-  const v = computeVerdict({ judge: judge([met('price', '$96'), { point: 'badge', status: 'unclear', evidence: '', source: 'screenshot' }]), pageText: PAGE, gaveUp: null });
+  const v = computeVerdict({ judge: judge([met('price', '$96'), { point: 'badge', status: 'unclear', evidence: '', source: 'screenshot' }]), pageText: PAGE, gaveUp: null, skipped: null, reliesOn: [] });
   assert.equal(v.verdict, 'needs_review');
 });
 
 test('all met with quotes found (case/whitespace-insensitive) → pass', () => {
-  const v = computeVerdict({ judge: judge([met('badge', 'Save 20%'), met('layout', 'two columns', 'screenshot')]), pageText: PAGE, gaveUp: null });
+  const v = computeVerdict({ judge: judge([met('badge', 'Save 20%'), met('layout', 'two columns', 'screenshot')]), pageText: PAGE, gaveUp: null, skipped: null, reliesOn: [] });
   assert.equal(v.verdict, 'pass');
   assert.deepEqual(v.quoteProblems, []);
 });
 
 test('a met text quote not on the page → needs_review with the quote listed', () => {
-  const v = computeVerdict({ judge: judge([met('badge', 'Save 25% today')]), pageText: PAGE, gaveUp: null });
+  const v = computeVerdict({ judge: judge([met('badge', 'Save 25% today')]), pageText: PAGE, gaveUp: null, skipped: null, reliesOn: [] });
   assert.equal(v.verdict, 'needs_review');
   assert.deepEqual(v.quoteProblems, ['Save 25% today']);
 });
 
 test('all points met but the judge says fail → needs_review, never pass (C1)', () => {
-  const v = computeVerdict({ judge: judge([met('cart', 'Cart')], 'fail', 'Cart still shows 0 items'), pageText: 'Cart: 0', gaveUp: null });
+  const v = computeVerdict({ judge: judge([met('cart', 'Cart')], 'fail', 'Cart still shows 0 items'), pageText: 'Cart: 0', gaveUp: null, skipped: null, reliesOn: [] });
   assert.equal(v.verdict, 'needs_review');
   assert.match(v.reason, /disagrees/);
 });
 
 test('a met text point whose evidence wraps the exact quote in a description → pass (SRCH-01)', () => {
-  const v = computeVerdict({ judge: judge([met('badge', 'Page text lists "Save 20%"; the screenshot shows it under the price.')]), pageText: PAGE, gaveUp: null });
+  const v = computeVerdict({ judge: judge([met('badge', 'Page text lists "Save 20%"; the screenshot shows it under the price.')]), pageText: PAGE, gaveUp: null, skipped: null, reliesOn: [] });
   assert.equal(v.verdict, 'pass');
 });
 
 test('a wrapped quote that is not on the page → still needs_review', () => {
-  const v = computeVerdict({ judge: judge([met('badge', 'Page text lists "Save 25%" near the price')]), pageText: PAGE, gaveUp: null });
+  const v = computeVerdict({ judge: judge([met('badge', 'Page text lists "Save 25%" near the price')]), pageText: PAGE, gaveUp: null, skipped: null, reliesOn: [] });
   assert.equal(v.verdict, 'needs_review');
 });
 
 test('a met point with no evidence → needs_review', () => {
-  assert.equal(computeVerdict({ judge: judge([met('badge', '  ', 'screenshot')]), pageText: PAGE, gaveUp: null }).verdict, 'needs_review');
+  assert.equal(computeVerdict({ judge: judge([met('badge', '  ', 'screenshot')]), pageText: PAGE, gaveUp: null, skipped: null, reliesOn: [] }).verdict, 'needs_review');
 });
 
 test('normalizeForQuote folds case, whitespace, curly quotes and zero-width chars', () => {
@@ -79,4 +79,81 @@ test('parseJudgeOutput rejects invalid JSON and bad shapes', () => {
   assert.equal(parseJudgeOutput(JSON.stringify({ keyPoints: [{ point: 'a', status: 'maybe', evidence: '', source: 'text' }], verdict: 'pass', reason: '' })), null);
   const ok = parseJudgeOutput(JSON.stringify(judge([met('a', 'b')])));
   assert.equal(ok?.keyPoints.length, 1);
+});
+
+const REL_PAGE = 'Listing\nLocated in Germany\n$96 per year';
+const rel = (what: string, evidence: string, status: 'met' | 'not_met' | 'unclear' = 'met', source: 'text' | 'screenshot' = 'text') => ({ what, status, evidence, source });
+const due = [{ what: 'The listing is in France', pageText: REL_PAGE }];
+const okPoints = [met('price', '$96')];
+const completed = (j: JudgeOutput | null, reliesOn = due, pageText = PAGE) => computeVerdict({ judge: j, pageText, gaveUp: null, skipped: null, reliesOn });
+
+test('skipped → not_run with the skip reason', () => {
+  const v = computeVerdict({ judge: null, pageText: '', gaveUp: null, skipped: 'Depends on S1, which failed', reliesOn: [] });
+  assert.deepEqual([v.verdict, v.reason], ['not_run', 'Depends on S1, which failed']);
+});
+
+test('no_matching_page → needs_review', () => {
+  const v = computeVerdict({ judge: null, pageText: '', gaveUp: { class: 'no_matching_page', reason: 'no listing in France' }, skipped: null, reliesOn: [] });
+  assert.deepEqual([v.verdict, v.reason], ['needs_review', "Couldn't find a page that matches: no listing in France"]);
+});
+
+test('completed, all key points met, relies_on met with a real quote → pass', () => {
+  const v = completed(judge(okPoints, 'pass', 'ok', [rel('The listing is in France', 'Located in Germany')]));
+  assert.equal(v.verdict, 'pass');
+});
+
+test('completed, key points met, relies_on not_met → needs_review', () => {
+  const v = completed(judge(okPoints, 'pass', 'ok', [rel('The listing is in France', 'Located in Germany', 'not_met')]));
+  assert.deepEqual([v.verdict, v.reason], ['needs_review', "Couldn't confirm the test ran on the right page: The listing is in France"]);
+});
+
+test('completed, judge left out the relies_on entry → needs_review', () => {
+  assert.equal(completed(judge(okPoints)).verdict, 'needs_review');
+});
+
+test('completed, judge renamed the relies_on what → needs_review', () => {
+  assert.equal(completed(judge(okPoints, 'pass', 'ok', [rel('The listing is in Spain', 'Located in Germany')])).verdict, 'needs_review');
+});
+
+test('completed, relies_on quote not on that checkpoint page → needs_review and in quoteProblems', () => {
+  const v = completed(judge(okPoints, 'pass', 'ok', [rel('The listing is in France', 'Located in France')]), due, PAGE);
+  assert.equal(v.verdict, 'needs_review');
+  assert.deepEqual(v.quoteProblems, ['Located in France']);
+});
+
+test('completed, relies_on matched ignoring case and spacing', () => {
+  const v = completed(judge(okPoints, 'pass', 'ok', [rel('  the listing IS in france ', 'located   in germany')]));
+  assert.equal(v.verdict, 'pass');
+});
+
+test('completed, relies_on unconfirmed but a key point not_met → still needs_review, never fail', () => {
+  const v = completed(judge([{ point: 'badge', status: 'not_met', evidence: 'none', source: 'screenshot' }], 'fail', 'Badge missing'));
+  assert.equal(v.verdict, 'needs_review');
+});
+
+test('completed, relies_on met with screenshot source needs evidence text only', () => {
+  assert.equal(completed(judge(okPoints, 'pass', 'ok', [rel('The listing is in France', 'flag shown', 'met', 'screenshot')])).verdict, 'pass');
+  assert.equal(completed(judge(okPoints, 'pass', 'ok', [rel('The listing is in France', ' ', 'met', 'screenshot')])).verdict, 'needs_review');
+});
+
+test('app_problem, no items due → fail', () => {
+  const v = computeVerdict({ judge: null, pageText: '', gaveUp: { class: 'app_problem', reason: 'Button missing' }, skipped: null, reliesOn: [] });
+  assert.deepEqual([v.verdict, v.reason], ['fail', 'Button missing']);
+});
+
+test('app_problem, due item met → fail', () => {
+  const v = computeVerdict({ judge: judge([], 'needs_review', '', [rel('The listing is in France', 'Located in Germany')]), pageText: '', gaveUp: { class: 'app_problem', reason: 'Button missing' }, skipped: null, reliesOn: due });
+  assert.deepEqual([v.verdict, v.reason], ['fail', 'Button missing']);
+});
+
+test('app_problem, due item unclear → needs_review', () => {
+  const v = computeVerdict({ judge: judge([], 'needs_review', '', [rel('The listing is in France', '', 'unclear')]), pageText: '', gaveUp: { class: 'app_problem', reason: 'Button missing' }, skipped: null, reliesOn: due });
+  assert.deepEqual([v.verdict, v.reason], ['needs_review', 'Stopped on a page that may not be the right one: The listing is in France']);
+});
+
+test('parseJudgeOutput: missing reliesOn reads as []; malformed reliesOn entry → null', () => {
+  assert.deepEqual(parseJudgeOutput('{"keyPoints":[],"verdict":"pass","reason":""}')?.reliesOn, []);
+  assert.equal(parseJudgeOutput('{"keyPoints":[],"reliesOn":[{"what":"x","status":"bogus","source":"text"}],"verdict":"pass"}'), null);
+  const ok = parseJudgeOutput('{"keyPoints":[],"reliesOn":[{"what":"x","status":"met","evidence":"e","source":"text"}],"verdict":"pass"}');
+  assert.deepEqual(ok?.reliesOn, [{ what: 'x', status: 'met', evidence: 'e', source: 'text' }]);
 });

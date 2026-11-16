@@ -12,7 +12,7 @@ import { takeSnapshot, type Snapshot } from './snapshot.ts';
 import type { Scenario, Suite } from './types.ts';
 import { findValue, missingFields } from './values.ts';
 
-export type GaveUp = { class: 'app_problem' | 'tooling_or_environment'; reason: string };
+export type GaveUp = { class: 'app_problem' | 'tooling_or_environment' | 'no_matching_page'; reason: string };
 
 export type ScenarioState = {
   scenario: Scenario;

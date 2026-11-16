@@ -195,6 +195,17 @@ test('giveup on a never-started scenario records it without evidence', async () 
   }
 });
 
+test('giveup accepts no_matching_page', async () => {
+  const { d, runDir } = await inProcess([]);
+  try {
+    await cmd(d, 'giveup', { id: 'S2', class: 'no_matching_page', reason: 'no listing in France' });
+    const run = JSON.parse(fs.readFileSync(path.join(runDir, 'run.json'), 'utf8'));
+    assert.deepEqual(run.scenarios.S2.gaveUp, { class: 'no_matching_page', reason: 'no listing in France' });
+  } finally {
+    await d.close();
+  }
+});
+
 async function botChatDaemon() {
   const dir = tmp('daemon-bot');
   const file = path.join(dir, 'suite.yaml');

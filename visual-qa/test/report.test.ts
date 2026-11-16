@@ -116,6 +116,17 @@ test('titles are HTML-escaped', () => {
   assert.ok(html.includes('&lt;script&gt;alert(1)&lt;/script&gt;'));
 });
 
+test('failed requests appear under Page checks; older runs without them say "none"', () => {
+  const runDir = syntheticRun('none');
+  const file = path.join(runDir, 'run.json');
+  const run = JSON.parse(fs.readFileSync(file, 'utf8'));
+  run.scenarios.P1.evidence.failedRequests = ['403 POST a.example/api/chat — {"errors":[{"code":"recaptcha_unsuccessful"}]}'];
+  fs.writeFileSync(file, JSON.stringify(run));
+  const html = renderReport(buildReportModel(runDir, { configDir: TRANSCRIPTS }), fakeImage);
+  assert.ok(html.includes('Failed requests: 403 POST a.example/api/chat — {&quot;errors&quot;:[{&quot;code&quot;:&quot;recaptcha_unsuccessful&quot;}]}'));
+  assert.ok(html.includes('Failed requests: none'), 'F1 has evidence without the field');
+});
+
 test('chrome-mode runs say so in the header; isolated runs do not', () => {
   const chrome = renderReport(buildReportModel(syntheticRun('none', 'chrome'), { configDir: TRANSCRIPTS }), fakeImage);
   assert.ok(chrome.includes('Ran in your Chrome (shared sign-ins and state)'));

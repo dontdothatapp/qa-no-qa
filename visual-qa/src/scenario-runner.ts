@@ -6,6 +6,7 @@ import { captureEvidence, type Evidence } from './evidence.ts';
 import type { EventLog } from './events.ts';
 import { effectiveOperation, evaluate, type HandbackReason } from './handback.ts';
 import { JevError, type JevClient } from './jev-client.ts';
+import { botBlockReason, onSite, readFailed, type FailedRequest } from './network.ts';
 import { resolveStartUrl } from './scenarios.ts';
 import { takeSnapshot, type Snapshot } from './snapshot.ts';
 import type { Scenario, Suite } from './types.ts';
@@ -47,6 +48,12 @@ export type ScenarioState = {
   ownsContext: boolean;
   /** Tabs this scenario opened (its page and popups from it); the only tabs `switch_tab` and `closeScenario` touch. */
   ownPages: Page[];
+  /** Requests to the scenario's own site that the server refused (latest 30). */
+  failedRequests: FailedRequest[];
+  /** The first refusal that looked like bot protection (reCAPTCHA etc.); it ends the scenario. */
+  botBlock: FailedRequest | null;
+  /** Refused responses whose body is still being read. */
+  pendingResponses: Set<Promise<void>>;
 };
 
 export type RunResult = {
@@ -57,6 +64,7 @@ export type RunResult = {
   reason?: HandbackReason;
   detail?: string;
   missingFields?: string[];
+  gaveUp?: GaveUp;
   jevActions: number;
   claudeActions: number;
   elapsedMs: number;
@@ -67,6 +75,18 @@ export type RunnerTimeouts = { navTimeoutMs?: number; actionTimeoutMs?: number; 
 function watchPage(state: ScenarioState, page: Page): void {
   page.on('response', (r) => {
     if (r.request().isNavigationRequest() && r.frame() === page.mainFrame() && page === state.page) state.lastNavStatus = r.status();
+    // the site's own server refusing a request is invisible on the page (e.g. a chat that silently does
+    // nothing because reCAPTCHA rejected the message): record it; third-party failures are noise
+    if (r.status() < 400 || !onSite(r.url(), state.suite.allowHosts)) return;
+    const pending: Promise<void> = readFailed(r)
+      .then((f) => {
+        state.failedRequests.push(f);
+        if (state.failedRequests.length > 30) state.failedRequests.shift();
+        if (f.botBlock && !state.botBlock) state.botBlock = f;
+      })
+      .catch(() => {})
+      .finally(() => state.pendingResponses.delete(pending));
+    state.pendingResponses.add(pending);
   });
   page.on('console', (m) => {
     if (m.type() === 'error' && state.consoleErrors.length < 20) state.consoleErrors.push(m.text().slice(0, 300));
@@ -103,7 +123,7 @@ async function initScenario(
     hashBeforeLastAction: null, unchangedCount: 0, recentActions: [], stepActionLog: [], lastTypedRef: null, lastSnapshot: null,
     madeUp, madeUpUsed: {}, handbacks: [], status: 'running', gaveUp: null, evidence: null,
     lastNavStatus: null, consoleErrors: [], newTabOpened: false, openError: null, crashed: false,
-    ownsContext, ownPages: [page],
+    ownsContext, ownPages: [page], failedRequests: [], botBlock: null, pendingResponses: new Set(),
   };
   watchPage(state, page);
   onCreated?.(state); // register before navigating, so a stop mid-load still closes this tab
@@ -163,8 +183,48 @@ export function resultOf(state: ScenarioState, extra: Partial<RunResult> = {}): 
     jevActions: state.jevActions,
     claudeActions: state.claudeActions,
     elapsedMs: state.elapsedMs,
+    ...(state.gaveUp ? { gaveUp: state.gaveUp } : {}),
     ...extra,
   };
+}
+
+/** Lets refused responses that already arrived finish being read (bounded wait). */
+export async function settleResponses(state: ScenarioState, waitMs = 3000): Promise<void> {
+  if (!state.pendingResponses.size) return;
+  let timer: NodeJS.Timeout | undefined;
+  await Promise.race([Promise.allSettled([...state.pendingResponses]), new Promise((r) => { timer = setTimeout(r, waitMs); })]);
+  clearTimeout(timer);
+}
+
+/** The give-up the runner records when the site's bot protection refused a request. */
+export function blockedGiveUp(block: FailedRequest): GaveUp {
+  return { class: 'tooling_or_environment', reason: botBlockReason(block) };
+}
+
+function endGaveUp(state: ScenarioState, gaveUp: GaveUp, events: EventLog): RunResult {
+  state.status = 'gave_up';
+  state.gaveUp = gaveUp;
+  const result = resultOf(state);
+  events.append({ type: 'scenario_end', id: state.scenario.id, status: 'gave_up', elapsedMs: result.elapsedMs });
+  return result;
+}
+
+/** Ends the scenario as given up, with evidence of where it stopped. */
+export async function finishGaveUp(state: ScenarioState, gaveUp: GaveUp, events: EventLog, runDir: string, t: RunnerTimeouts = {}): Promise<RunResult> {
+  state.evidence = await captureEvidence(state, runDir, { settleMs: t.settleMs }).catch(() => null);
+  return endGaveUp(state, gaveUp, events);
+}
+
+/**
+ * When the site's bot protection refused a request, the scenario cannot be carried out by automation:
+ * end it as tooling_or_environment (never an app failure, never a retry) and say so. null when not blocked.
+ */
+export async function stopIfBlocked(state: ScenarioState, events: EventLog, runDir: string, t: RunnerTimeouts = {}): Promise<RunResult | null> {
+  await settleResponses(state);
+  if (!state.botBlock) return null;
+  const gaveUp = blockedGiveUp(state.botBlock);
+  events.append({ type: 'giveup', id: state.scenario.id, actor: 'runner', ...gaveUp });
+  return finishGaveUp(state, gaveUp, events, runDir, t);
 }
 
 /** Advances to the next step and resets the per-step counters. */
@@ -179,7 +239,16 @@ export function advanceStep(state: ScenarioState): void {
 }
 
 export async function completeScenario(state: ScenarioState, events: EventLog, runDir: string, t: RunnerTimeouts = {}): Promise<RunResult> {
+  const blocked = await stopIfBlocked(state, events, runDir, t);
+  if (blocked) return blocked;
   state.evidence = await captureEvidence(state, runDir, { settleMs: t.settleMs });
+  await settleResponses(state);
+  if (state.botBlock) {
+    // refused while the evidence was being captured: the result on screen cannot be trusted
+    const gaveUp = blockedGiveUp(state.botBlock);
+    events.append({ type: 'giveup', id: state.scenario.id, actor: 'runner', ...gaveUp });
+    return endGaveUp(state, gaveUp, events);
+  }
   state.status = 'completed';
   const result = resultOf(state);
   events.append({ type: 'scenario_end', id: state.scenario.id, status: 'completed', elapsedMs: result.elapsedMs });
@@ -214,6 +283,8 @@ export async function runJev(state: ScenarioState, deps: { jev: JevClient; event
   const { jev, events, runDir } = deps;
   const s = state.scenario;
   state.status = 'running';
+  const blockedAtStart = await stopIfBlocked(state, events, runDir, deps);
+  if (blockedAtStart) return blockedAtStart;
   if (state.openError) {
     const message = state.openError;
     state.openError = null; // reported once; Claude may fix the page and resume
@@ -222,6 +293,8 @@ export async function runJev(state: ScenarioState, deps: { jev: JevClient; event
 
   while (state.currentStep < s.steps.length) {
     if (state.crashed) return handback(state, events, 'error', 'the page crashed');
+    const blocked = await stopIfBlocked(state, events, runDir, deps);
+    if (blocked) return blocked;
     const stepText = s.steps[state.currentStep];
     let snap: Snapshot;
     try {

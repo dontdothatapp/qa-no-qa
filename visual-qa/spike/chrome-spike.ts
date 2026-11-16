@@ -34,7 +34,7 @@ if (emulate) {
 }
 
 log(`connecting (${emulate ? 'emulated Chromium' : 'your Chrome — click Allow in Chrome'})…`);
-const browser = await chromium.connectOverCDP(endpoint, { timeout: 120_000 });
+const browser = await chromium.connectOverCDP(endpoint, { timeout: 120_000, noDefaults: true });
 log(`connected: Chrome ${browser.version()}, contexts=${browser.contexts().length}`);
 const ctx = browser.contexts()[0];
 const before = ctx.pages().length;

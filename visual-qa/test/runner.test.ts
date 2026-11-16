@@ -174,3 +174,26 @@ test('after a new_tab hand-back, resume does not loop on the same flag (M1)', as
   const second = await run(state, runDir, [{ operation: 'done' }]);
   assert.equal(second.result.status, 'completed');
 });
+
+test('the site refusing a request with a reCAPTCHA 403 ends the scenario as blocked, not as a hand-back', async () => {
+  const { state, runDir } = await start(scenario({ start: '/bot-chat.html', steps: ['Click "Send"', 'Wait for the reply'] }));
+  const send = await refOf(state, 'Send');
+  const { result, events } = await run(state, runDir, [{ operation: 'click', target: send }, { operation: 'done' }, { operation: 'done' }]);
+  assert.equal(result.status, 'gave_up');
+  assert.equal(result.gaveUp?.class, 'tooling_or_environment');
+  assert.match(result.gaveUp?.reason ?? '', /^Blocked by the site's bot protection: POST 127\.0\.0\.1:\d+\/api\/chat returned 403 ".*recaptcha check unsuccessful/);
+  assert.doesNotMatch(result.gaveUp?.reason ?? '', /SECRET123/, 'query strings are never recorded');
+  assert.equal(state.status, 'gave_up');
+  assert.ok(state.evidence && fs.existsSync(state.evidence.viewportShot), 'evidence is captured for the report');
+  const logged = events.read();
+  assert.ok(logged.some((e) => e.type === 'giveup' && e.actor === 'runner' && e.class === 'tooling_or_environment'));
+  assert.ok(!logged.some((e) => e.type === 'jev_decision' && e.step === 1), 'Jev is not asked again after the block');
+});
+
+test('ordinary failed requests are recorded as evidence but do not stop the scenario', async () => {
+  const { state, runDir } = await start(scenario({ start: '/bot-chat.html', steps: ['Click "Ping"'] }));
+  const ping = await refOf(state, 'Ping');
+  const { result } = await run(state, runDir, [{ operation: 'click', target: ping }, { operation: 'done' }]);
+  assert.equal(result.status, 'completed');
+  assert.deepEqual(state.evidence?.failedRequests, [`500 POST ${new URL(fx.baseUrl()).host}/api/broken — {"error":"database timeout"}`]);
+});

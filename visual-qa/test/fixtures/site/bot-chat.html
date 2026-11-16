@@ -1,0 +1,11 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Chat</title></head><body>
+<h1>Chat</h1>
+<p><input id="q" aria-label="Message"> <button id="send">Send</button> <button id="slow">Send slowly</button> <button id="ping">Ping</button></p>
+<p id="out"></p>
+<script>
+const post = async (url) => { const r = await fetch(url, { method: 'POST', body: document.getElementById('q').value }); document.getElementById('out').textContent = r.ok ? 'Reply' : 'Pinged'; };
+document.getElementById('send').onclick = () => post('/api/chat?session=SECRET123');
+document.getElementById('slow').onclick = () => post('/api/slow-chat');
+document.getElementById('ping').onclick = () => post('/api/broken');
+</script>
+</body></html>

@@ -30,13 +30,15 @@ Hand-back from the runner (where it stopped and why):
 5. If the site rejects a made-up value (format error etc.), give up as `tooling_or_environment` and say which field.
 6. Give-up classes:
    - `app_problem` — the page does not allow the step (button missing, error page, feature broken).
-   - `tooling_or_environment` — captcha, expired session, budget exceeded, widget the tools cannot operate.
+   - `tooling_or_environment` — captcha or other bot protection, expired session, budget exceeded, widget the tools cannot operate.
+   - If something you do has no effect (e.g. a Send button that sends nothing), check `look` for "Failed requests to the site" before calling it `app_problem`: a refused request (401/403/429) is usually the environment.
 7. Do not submit, buy, delete, pay or confirm anything unless a step explicitly asks for it, and stay on the scenario's site (the runner refuses `goto` to other hosts and typing into password fields).
 8. Hand-back reasons that need a decision:
    - `risky_target` — the navigator stopped before a click or Enter that could submit, buy or delete. Do it only if the current step clearly asks for exactly that; otherwise find the intended control instead.
    - `left_allowed_hosts` — the page went to another site. If that is expected (e.g. a payment or sign-in page the step mentions), finish the step there; otherwise go back with `act <id> goto <start or previous URL>` or give up as `app_problem` if the site itself sends you away.
    - `new_tab` — a tab or popup opened: `act <id> switch_tab 1` to work in it, `switch_tab 0` to return.
 9. Do not judge whether the expected result is met; another reviewer does that. Just get the steps done.
+10. When the site's bot protection (reCAPTCHA, a captcha, an "are you human" check) refuses a request, the runner ends the scenario itself: a command prints `"status":"gave_up"` with the reason, or `look` starts with "Blocked by the site's bot protection". Stop there and reply `gave_up` with that reason. Never retry or try to get around it.
 
 ## Reply
 

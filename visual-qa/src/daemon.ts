@@ -10,9 +10,10 @@ import { captureEvidence, type Evidence } from './evidence.ts';
 import { openEventLog, type EventLog } from './events.ts';
 import { createTypeSafeClient, type JevClient } from './jev-client.ts';
 import {
-  advanceStep, closeScenario, completeScenario, isAllowedUrl, openScenario, openScenarioInContext, resultOf, runJev,
-  type GaveUp, type RunnerTimeouts, type ScenarioState,
+  advanceStep, blockedGiveUp, closeScenario, completeScenario, finishGaveUp, isAllowedUrl, openScenario, openScenarioInContext,
+  resultOf, runJev, settleResponses, stopIfBlocked, type GaveUp, type RunnerTimeouts, type ScenarioState,
 } from './scenario-runner.ts';
+import { botBlockReason, describeFailed } from './network.ts';
 import { formatControl, takeSnapshot } from './snapshot.ts';
 import { CHROME_OFF_MESSAGE, connectChrome, explainConnectError, findChromeEndpoint } from './chrome.ts';
 import { writeReport } from './report.ts';
@@ -172,11 +173,15 @@ export async function startDaemon(runDir: string, opts: DaemonOptions = {}): Pro
       state.lastSnapshot = snap;
       const steps = state.scenario.steps;
       const shown = snap.controls.slice(0, DEFAULTS.lookMaxControls);
+      await settleResponses(state, 1000);
+      const failed = state.failedRequests.slice(-5).map(describeFailed);
       const lines = [
+        ...(state.botBlock ? [`${botBlockReason(state.botBlock)} — this scenario cannot continue; your next command ends it.`] : []),
         `URL: ${snap.url}`,
         `Title: ${snap.title}`,
         state.currentStep < steps.length ? `Step ${state.currentStep + 1} of ${steps.length}: "${steps[state.currentStep]}"` : 'All steps done',
         `Open tabs: ${state.ownPages.filter((p) => !p.isClosed()).length}`,
+        ...(failed.length ? ['Failed requests to the site:', ...failed] : []),
         `Controls (${snap.controls.length}${shown.length < snap.controls.length ? `, first ${shown.length} shown` : ''}):`,
         ...shown.map(formatControl),
         'Page text:',
@@ -214,7 +219,12 @@ export async function startDaemon(runDir: string, opts: DaemonOptions = {}): Pro
         type: 'action', id: state.scenario.id, step: state.currentStep, actor: 'claude', op, ref: ref ?? null, label: control?.name ?? null,
         ...(value !== undefined && !control?.isPassword ? { value } : {}), ...(a.madeUp ? { valueSource: 'made_up' } : {}), ok: res.ok,
       });
+      const blocked = await stopIfBlocked(state, events, runDir, t);
       persist(state);
+      if (blocked) {
+        await finishIfDone(state);
+        return blocked;
+      }
       if (!res.ok) throw new CommandError(res.detail);
       return { ok: true, url: state.page.url(), claudeActions: state.claudeActions, budgetLeft: budget - state.claudeActions };
     },
@@ -234,6 +244,12 @@ export async function startDaemon(runDir: string, opts: DaemonOptions = {}): Pro
     async 'step-done'(a) {
       needBrowser();
       const state = openState(a.id);
+      const blocked = await stopIfBlocked(state, events, runDir, t);
+      if (blocked) {
+        persist(state);
+        await finishIfDone(state);
+        return blocked;
+      }
       events.append({ type: 'step_done', id: state.scenario.id, step: state.currentStep, actor: 'claude' });
       advanceStep(state);
       let result;
@@ -254,20 +270,20 @@ export async function startDaemon(runDir: string, opts: DaemonOptions = {}): Pro
       if (!cls) throw new CommandError('--class must be app_problem or tooling_or_environment');
       const reason = String(a.reason ?? '').trim();
       if (!reason) throw new CommandError('--reason is required');
-      const gaveUp: GaveUp = { class: cls, reason };
+      const requested: GaveUp = { class: cls, reason };
       const state = states.get(s.id);
-      events.append({ type: 'giveup', id: s.id, ...gaveUp });
       if (!state) {
-        run.scenarios[s.id] = { ...emptyRecord(), status: 'gave_up', gaveUp };
+        events.append({ type: 'giveup', id: s.id, ...requested });
+        run.scenarios[s.id] = { ...emptyRecord(), status: 'gave_up', gaveUp: requested };
         writeRunFile(runDir, run);
-        return { id: s.id, status: 'gave_up', step: 0, stepText: s.steps[0] ?? null, jevActions: 0, claudeActions: 0, elapsedMs: 0 };
+        return { id: s.id, status: 'gave_up', step: 0, stepText: s.steps[0] ?? null, jevActions: 0, claudeActions: 0, elapsedMs: 0, gaveUp: requested };
       }
       if (state.status === 'completed' || state.status === 'gave_up') throw new CommandError(`scenario ${s.id} is already ${state.status}`);
-      state.evidence = await captureEvidence(state, runDir, { settleMs: t.settleMs }).catch(() => null);
-      state.status = 'gave_up';
-      state.gaveUp = gaveUp;
-      const result = resultOf(state);
-      events.append({ type: 'scenario_end', id: s.id, status: 'gave_up', elapsedMs: result.elapsedMs });
+      // the runner saw the site's bot protection refuse a request: that, not the takeover's guess, is the reason
+      await settleResponses(state);
+      const gaveUp = state.botBlock ? blockedGiveUp(state.botBlock) : requested;
+      events.append({ type: 'giveup', id: s.id, ...gaveUp, ...(gaveUp !== requested ? { requested } : {}) });
+      const result = await finishGaveUp(state, gaveUp, events, runDir, t);
       persist(state);
       await finishIfDone(state);
       return result;

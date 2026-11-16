@@ -6,12 +6,22 @@ import { fileURLToPath } from 'node:url';
 const SITE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'site');
 const TYPES: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.txt': 'text/plain', '.png': 'image/png' };
 
-/** Static server for the fixture site. `/hang` never responds (for timeout tests). */
+const RECAPTCHA_403 = JSON.stringify({ errors: [{ code: 'recaptcha_unsuccessful', message: 'recaptcha check unsuccessful' }] });
+const json = (res: http.ServerResponse, status: number, body: string) => res.writeHead(status, { 'content-type': 'application/json' }).end(body);
+
+/**
+ * Static server for the fixture site. `/hang` never responds (for timeout tests).
+ * `/api/chat` refuses like a reCAPTCHA-protected API (403),
+ * `/api/slow-chat` does the same after 1.5 s, `/api/broken` fails with an ordinary 500.
+ */
 export function serveFixtures(port = 0, host = '127.0.0.1'): Promise<{ url: string; port: number; close(): Promise<void> }> {
   const sockets = new Set<import('node:net').Socket>();
   const server = http.createServer((req, res) => {
     const urlPath = decodeURIComponent(new URL(req.url ?? '/', 'http://x').pathname);
     if (urlPath === '/hang') return; // intentionally never answers
+    if (urlPath === '/api/chat') return void json(res, 403, RECAPTCHA_403);
+    if (urlPath === '/api/slow-chat') return void setTimeout(() => json(res, 403, RECAPTCHA_403), 1500);
+    if (urlPath === '/api/broken') return void json(res, 500, '{"error":"database timeout"}');
     const rel = urlPath === '/' ? 'index.html' : urlPath.replace(/^\/+/, '');
     const file = path.join(SITE, rel);
     if (!file.startsWith(SITE) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {

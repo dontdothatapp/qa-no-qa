@@ -14,7 +14,7 @@ export type ReportRow = {
   reason: string;
   keyPoints: KeyPoint[];
   quoteProblems: string[];
-  gates: { httpStatus: number | null; consoleErrors: string[]; errorPhrase: string | null };
+  gates: { httpStatus: number | null; consoleErrors: string[]; failedRequests: string[]; errorPhrase: string | null };
   handbacks: Array<{ step: number; reason: string; detail?: string }>;
   madeUp: Record<string, string>;
   jevActions: number;
@@ -70,7 +70,7 @@ export function buildReportModel(runDir: string, opts: { configDir?: string } = 
     return {
       id: s.id, title: s.title, steps: s.steps, expected: s.expected,
       verdict: v.verdict, reason: v.reason, keyPoints: judge?.keyPoints ?? [], quoteProblems: v.quoteProblems,
-      gates: { httpStatus: ev?.httpStatus ?? null, consoleErrors: ev?.consoleErrors ?? [], errorPhrase: ev?.errorPhrase ?? null },
+      gates: { httpStatus: ev?.httpStatus ?? null, consoleErrors: ev?.consoleErrors ?? [], failedRequests: ev?.failedRequests ?? [], errorPhrase: ev?.errorPhrase ?? null },
       handbacks: rec.handbacks, madeUp: rec.madeUp, jevActions: rec.jevActions, claudeActions: rec.claudeActions, elapsedMs: rec.elapsedMs,
       url: ev?.url ?? null, viewportShot: ev?.viewportShot ?? null, fullPageShot: ev?.fullPageShot ?? null,
       jevTokens: jev.byScenario[s.id] ?? { input: 0, output: 0 },
@@ -132,7 +132,7 @@ function rowHtml(r: ReportRow, readImage: (p: string) => Buffer, claudeAvailable
     : '';
   const quoteIssues = r.quoteProblems.length ? `<h4>Quotes not found on the page</h4><ul>${r.quoteProblems.map((q) => `<li><q>${esc(q)}</q></li>`).join('')}</ul>` : '';
   const g = r.gates;
-  const gates = `<h4>Page checks</h4><ul><li>HTTP status: ${g.httpStatus ?? 'n/a'}</li><li>Console errors: ${g.consoleErrors.length ? g.consoleErrors.map(esc).join('<br>') : 'none'}</li><li>Error text on page: ${g.errorPhrase ? `<q>${esc(g.errorPhrase)}</q>` : 'none'}</li>${r.url ? `<li>Final URL: <code>${esc(r.url)}</code></li>` : ''}</ul>`;
+  const gates = `<h4>Page checks</h4><ul><li>HTTP status: ${g.httpStatus ?? 'n/a'}</li><li>Console errors: ${g.consoleErrors.length ? g.consoleErrors.map(esc).join('<br>') : 'none'}</li><li>Failed requests: ${g.failedRequests.length ? g.failedRequests.map(esc).join('<br>') : 'none'}</li><li>Error text on page: ${g.errorPhrase ? `<q>${esc(g.errorPhrase)}</q>` : 'none'}</li>${r.url ? `<li>Final URL: <code>${esc(r.url)}</code></li>` : ''}</ul>`;
   const claudeTotal = sumUsage(r.claudeTokens);
   return `<article class="row" data-verdict="${r.verdict}">
   <div class="id">${esc(r.id)}</div>

@@ -41,6 +41,7 @@ Run `node ${CLAUDE_SKILL_DIR}/bin/qa.ts start <file> --session ${CLAUDE_SESSION_
 
 For each id: `node ${CLAUDE_SKILL_DIR}/bin/qa.ts run <id>`.
 - `"status":"completed"` → next scenario.
+- `"status":"gave_up"` → the runner ended it (e.g. the site's bot protection refused a request; the reason is in `gaveUp`) → next scenario. Do not retry it.
 - `"status":"handback"` with `"reason":"jev_unavailable"` → ask the user: should Claude drive the remaining scenarios, or stop?
   - Stop → for every scenario not finished, including the current one: `node ${CLAUDE_SKILL_DIR}/bin/qa.ts giveup <id> --class tooling_or_environment --reason "Jev unavailable"`, then go to step 6.
   - Claude drives → handle this and every remaining scenario with a takeover agent (below), calling `run` first so the page opens.

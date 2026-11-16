@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { DEFAULTS } from './config.ts';
+import { describeFailed } from './network.ts';
 import type { ScenarioState } from './scenario-runner.ts';
 import { withTimeout } from './util.ts';
 
@@ -9,6 +10,8 @@ export type Evidence = {
   title: string;
   httpStatus: number | null;
   consoleErrors: string[];
+  /** Requests to the scenario's site the server refused, e.g. `403 POST a.example/api/chat — <reply>`. */
+  failedRequests: string[];
   textFile: string;
   viewportShot: string;
   fullPageShot: string;
@@ -40,6 +43,7 @@ export async function captureEvidence(state: ScenarioState, runDir: string, opts
     title: await withTimeout(page.title(), 5000, 'reading the title').catch(() => ''),
     httpStatus: state.lastNavStatus,
     consoleErrors: [...state.consoleErrors],
+    failedRequests: state.failedRequests.map(describeFailed),
     textFile,
     viewportShot,
     fullPageShot,

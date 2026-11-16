@@ -187,6 +187,82 @@ test('giveup on a never-started scenario records it without evidence', async () 
   }
 });
 
+async function botChatDaemon() {
+  const dir = tmp('daemon-bot');
+  const file = path.join(dir, 'suite.yaml');
+  fs.writeFileSync(file, `topic: Bot wall\nbrowser: isolated\nbase_url: ${server.url}/\nscenarios:\n  - {id: B1, title: Chat, start: /bot-chat.html, steps: ['Click "Send"', 'Wait for the reply'], expected: A reply}\n`);
+  const env = { ...process.env, VISUAL_QA_OUTPUT_DIR: dir };
+  const runDir = createRunFolder(loadSuite(file), 'session-x', new Date(), env);
+  // Jev hands back straight away, so Claude drives
+  const d = await startDaemon(runDir, { jev: createScriptedClient([{ operation: 'done', opConfidence: 0.3 }]), navTimeoutMs: 5000, actionTimeoutMs: 3000, settleMs: 50 });
+  const r = await cmd(d, 'run', { id: 'B1' });
+  assert.equal(r.body.result.status, 'handback');
+  const look = (await cmd(d, 'look', { id: 'B1' })).body.result.text as string;
+  const refOf = (name: string) => Number(look.match(new RegExp(`\\[(\\d+)\\] button "${name}"`))?.[1]);
+  return { d, runDir, refOf };
+}
+
+test('a takeover click that hits the bot wall ends the scenario as blocked (act → gave_up)', async () => {
+  const { d, runDir, refOf } = await botChatDaemon();
+  try {
+    const a = await cmd(d, 'act', { id: 'B1', op: 'click', ref: refOf('Send') });
+    assert.equal(a.body.ok, true, JSON.stringify(a.body));
+    assert.equal(a.body.result.status, 'gave_up');
+    assert.match(a.body.result.gaveUp.reason, /^Blocked by the site's bot protection: POST .*\/api\/chat returned 403/);
+    const run = JSON.parse(fs.readFileSync(path.join(runDir, 'run.json'), 'utf8'));
+    assert.equal(run.scenarios.B1.status, 'gave_up');
+    assert.equal(run.scenarios.B1.gaveUp.class, 'tooling_or_environment');
+    assert.match(run.scenarios.B1.evidence.failedRequests[0], /^403 POST .*\/api\/chat — .*recaptcha/);
+    assert.match((await cmd(d, 'act', { id: 'B1', op: 'click', ref: refOf('Send') })).body.error ?? '', /already gave_up/);
+  } finally {
+    await d.close();
+  }
+});
+
+test('a block that arrives late shows in look, and a giveup records the block, not "app_problem"', async () => {
+  const { d, runDir, refOf } = await botChatDaemon();
+  try {
+    const a = await cmd(d, 'act', { id: 'B1', op: 'click', ref: refOf('Send slowly') });
+    assert.equal(a.body.result.claudeActions, 1, 'the slow reply has not arrived when act returns');
+    await new Promise((r) => setTimeout(r, 2000));
+    const look = (await cmd(d, 'look', { id: 'B1' })).body.result.text as string;
+    assert.match(look, /Blocked by the site's bot protection: POST .*\/api\/slow-chat returned 403/);
+    assert.match(look, /Failed requests to the site:\n403 POST .*\/api\/slow-chat/);
+    const g = await cmd(d, 'giveup', { id: 'B1', class: 'app_problem', reason: 'Send does nothing' });
+    assert.equal(g.body.result.status, 'gave_up');
+    const run = JSON.parse(fs.readFileSync(path.join(runDir, 'run.json'), 'utf8'));
+    assert.equal(run.scenarios.B1.gaveUp.class, 'tooling_or_environment');
+    assert.match(run.scenarios.B1.gaveUp.reason, /bot protection/);
+  } finally {
+    await d.close();
+  }
+});
+
+test('step-done after a block ends the scenario instead of moving on', async () => {
+  const { d, refOf } = await botChatDaemon();
+  try {
+    await cmd(d, 'act', { id: 'B1', op: 'click', ref: refOf('Send slowly') });
+    await new Promise((r) => setTimeout(r, 2000));
+    const s = await cmd(d, 'step-done', { id: 'B1' });
+    assert.equal(s.body.result.status, 'gave_up');
+    assert.equal(s.body.result.step, 0, 'the step was not counted as done');
+  } finally {
+    await d.close();
+  }
+});
+
+test('look lists ordinary failed requests without calling them a block', async () => {
+  const { d, refOf } = await botChatDaemon();
+  try {
+    await cmd(d, 'act', { id: 'B1', op: 'click', ref: refOf('Ping') });
+    const look = (await cmd(d, 'look', { id: 'B1' })).body.result.text as string;
+    assert.match(look, /Failed requests to the site:\n500 POST .*\/api\/broken — \{"error":"database timeout"\}/);
+    assert.doesNotMatch(look, /bot protection/);
+  } finally {
+    await d.close();
+  }
+});
+
 test('wrong token → 401', async () => {
   const { d } = await inProcess([]);
   try {

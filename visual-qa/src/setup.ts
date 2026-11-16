@@ -34,6 +34,25 @@ export const UPDATES_NOTE = 'To get updates automatically: type /plugin, open Ma
 
 export const MIN_CHROME_MAJOR = 144;
 
+/** Single-quotes a value for a POSIX shell. */
+export function shellQuote(v: string): string {
+  return `'${v.replace(/'/g, `'\\''`)}'`;
+}
+
+export const CHROME_PLISTS = (home: string): string[] => [
+  '/Applications/Google Chrome.app/Contents/Info.plist',
+  path.join(home, 'Applications', 'Google Chrome.app', 'Contents', 'Info.plist'),
+];
+
+/** Chrome's major version from the first install location whose version can be read. */
+export function readChromeMajor(home: string, readVersion: (plist: string) => string | null): number | null {
+  for (const plist of CHROME_PLISTS(home)) {
+    const n = parseInt(readVersion(plist) ?? '', 10);
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
+}
+
 function nodeOk(version: string): boolean {
   const [maj, min] = version.replace(/^v/, '').split('.').map(Number);
   return maj > 22 || (maj === 22 && min >= 18);
@@ -41,7 +60,7 @@ function nodeOk(version: string): boolean {
 
 /** Setup checks, in the order the person has to fix them. Never includes key values in its output. */
 export async function runSetupChecks(d: SetupDeps): Promise<{ ok: boolean; items: SetupItem[]; next: SetupItem | null }> {
-  const cmd = (flag: string) => `node ${d.pluginRoot}/bin/setup.ts ${flag}`;
+  const cmd = (flag: string) => `node ${shellQuote(`${d.pluginRoot}/bin/setup.ts`)} ${flag}`;
   const items: SetupItem[] = [];
 
   const nodeGood = nodeOk(d.nodeVersion);
@@ -57,7 +76,7 @@ export async function runSetupChecks(d: SetupDeps): Promise<{ ok: boolean; items
     name: 'packages', level: 'error', ok: havePackages,
     detail: havePackages ? 'installed' : 'the runner\'s npm packages are missing',
     fix: havePackages ? null : 'The runner needs to download its packages (one time, about a minute).',
-    command: havePackages ? null : `npm install --omit=dev --prefix ${d.pluginRoot}`,
+    command: havePackages ? null : `npm ci --omit=dev --prefix ${shellQuote(d.pluginRoot)}`,
   });
 
   const key = findTypeSafeKey(d.env);
@@ -90,17 +109,20 @@ export async function runSetupChecks(d: SetupDeps): Promise<{ ok: boolean; items
   items.push(keyItem);
 
   const major = d.chromeMajorVersion();
-  const endpoint = major !== null && major >= MIN_CHROME_MAJOR ? d.chromeEndpoint() : null;
+  const endpoint = d.chromeEndpoint();
+  const offItem = (detail: string): SetupItem => ({
+    name: 'chrome', level: 'error', ok: false, detail,
+    fix: 'In the Chrome page that opens, switch on remote debugging (the toggle near the top).',
+    command: cmd('--open-chrome'),
+  });
   if (major === null) {
-    items.push({ name: 'chrome', level: 'error', ok: false, detail: 'Google Chrome not found', fix: 'Install Google Chrome from https://www.google.com/chrome, then run setup again.', command: null });
+    items.push(endpoint
+      ? { name: 'chrome', level: 'error', ok: true, detail: 'on (version unknown)', fix: null, command: null }
+      : { name: 'chrome', level: 'error', ok: false, detail: 'Google Chrome not found in /Applications or ~/Applications', fix: 'Install Google Chrome from https://www.google.com/chrome, then run setup again.', command: null });
   } else if (major < MIN_CHROME_MAJOR) {
     items.push({ name: 'chrome', level: 'error', ok: false, detail: `Chrome ${major} (needs ${MIN_CHROME_MAJOR} or newer)`, fix: 'Please update Chrome (Chrome menu > Help > About Google Chrome), then run setup again.', command: null });
   } else if (!endpoint) {
-    items.push({
-      name: 'chrome', level: 'error', ok: false, detail: `Chrome ${major}: ${CHROME_OFF_MESSAGE}`,
-      fix: 'In the Chrome page that opens, switch on remote debugging (the toggle near the top).',
-      command: cmd('--open-chrome'),
-    });
+    items.push(offItem(`Chrome ${major}: ${CHROME_OFF_MESSAGE}`));
   } else {
     items.push({ name: 'chrome', level: 'error', ok: true, detail: `Chrome ${major}, remote debugging on`, fix: null, command: null });
   }

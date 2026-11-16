@@ -7,9 +7,9 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { parseArgs } from 'node:util';
 import { findChromeEndpoint } from '../src/chrome-endpoint.ts';
 import { keyFile, pluginRoot } from '../src/config.ts';
-import { ensureKeyFile, PRIVACY_NOTE, runSetupChecks, TYPESAFE_KEY_URL, UPDATES_NOTE } from '../src/setup.ts';
+import os from 'node:os';
+import { ensureKeyFile, readChromeMajor, PRIVACY_NOTE, runSetupChecks, TYPESAFE_KEY_URL, UPDATES_NOTE } from '../src/setup.ts';
 
-const CHROME_PLIST = '/Applications/Google Chrome.app/Contents/Info.plist';
 const CHROME_ADDRESS = 'chrome://inspect/#remote-debugging';
 const root = pluginRoot();
 
@@ -27,13 +27,13 @@ function chromeMajorVersion(): number | null {
     const n = parseInt(process.env.VISUAL_QA_CHROME_VERSION, 10);
     return Number.isFinite(n) ? n : null;
   }
-  try {
-    const v = execFileSync('plutil', ['-extract', 'CFBundleShortVersionString', 'raw', CHROME_PLIST], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
-    const n = parseInt(v, 10);
-    return Number.isFinite(n) ? n : null;
-  } catch {
-    return null;
-  }
+  return readChromeMajor(process.env.HOME || os.homedir(), (plist) => {
+    try {
+      return execFileSync('plutil', ['-extract', 'CFBundleShortVersionString', 'raw', plist], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    } catch {
+      return null;
+    }
+  });
 }
 
 async function pingJev(key: string): Promise<void> {

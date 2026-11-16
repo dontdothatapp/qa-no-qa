@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { ensureKeyFile, runSetupChecks, PRIVACY_NOTE, UPDATES_NOTE, TYPESAFE_KEY_URL, type SetupDeps } from '../src/setup.ts';
+import { readChromeMajor, ensureKeyFile, runSetupChecks, PRIVACY_NOTE, UPDATES_NOTE, TYPESAFE_KEY_URL, type SetupDeps } from '../src/setup.ts';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
@@ -46,7 +46,7 @@ test('no TypeSafe key → not ok, next is typesafe_key with the open-key-file co
   const r = await runSetupChecks(deps({ env: { HOME: '/nonexistent' } }));
   assert.equal(r.ok, false);
   assert.equal(r.next?.name, 'typesafe_key');
-  assert.equal(r.next?.command, 'node /fake/root/bin/setup.ts --open-key-file');
+  assert.equal(r.next?.command, "node '/fake/root/bin/setup.ts' --open-key-file");
   assert.ok(r.next?.fix);
 });
 
@@ -73,7 +73,7 @@ test('Chrome remote debugging off → chrome item with the open-chrome command; 
   const off = await runSetupChecks(deps({ chromeEndpoint: () => null }));
   assert.equal(off.ok, false);
   assert.equal(off.next?.name, 'chrome');
-  assert.equal(off.next?.command, 'node /fake/root/bin/setup.ts --open-chrome');
+  assert.equal(off.next?.command, "node '/fake/root/bin/setup.ts' --open-chrome");
   assert.match(off.next?.fix ?? '', /remote debugging/);
   const on = await runSetupChecks(deps());
   assert.equal(item(on, 'chrome')?.ok, true);
@@ -93,10 +93,31 @@ test('Chrome older than 144 → chrome item says to update Chrome', async () => 
   assert.match(r.next?.fix ?? '', /update Chrome/i);
 });
 
-test('Chrome missing → chrome item says to install Chrome', async () => {
-  const r = await runSetupChecks(deps({ chromeMajorVersion: () => null }));
+test('Chrome version unknown and no endpoint → not found in either Applications folder', async () => {
+  const r = await runSetupChecks(deps({ chromeMajorVersion: () => null, chromeEndpoint: () => null }));
   assert.equal(r.next?.name, 'chrome');
+  assert.equal(r.next?.detail, 'Google Chrome not found in /Applications or ~/Applications');
   assert.match(r.next?.fix ?? '', /install/i);
+});
+
+test('Chrome version unknown but remote debugging is on → ok', async () => {
+  const r = await runSetupChecks(deps({ chromeMajorVersion: () => null }));
+  assert.equal(item(r, 'chrome')?.ok, true);
+  assert.equal(item(r, 'chrome')?.detail, 'on (version unknown)');
+});
+
+test('readChromeMajor falls back to ~/Applications', () => {
+  const seen: string[] = [];
+  const v = readChromeMajor('/Users/me', (plist) => { seen.push(plist); return plist.startsWith('/Users/me/Applications') ? '157.0.1.2\n' : null; });
+  assert.equal(v, 157);
+  assert.deepEqual(seen, ['/Applications/Google Chrome.app/Contents/Info.plist', '/Users/me/Applications/Google Chrome.app/Contents/Info.plist']);
+  assert.equal(readChromeMajor('/Users/me', () => null), null);
+});
+
+test('commands quote a plugin root containing spaces or quotes; packages use npm ci', async () => {
+  const r = await runSetupChecks(deps({ pluginRoot: "/My Plugins/it's here", packagesPresent: () => false, env: { HOME: '/nonexistent' } }));
+  assert.equal(item(r, 'packages')?.command, "npm ci --omit=dev --prefix '/My Plugins/it'\\''s here'");
+  assert.equal(item(r, 'typesafe_key')?.command, "node '/My Plugins/it'\\''s here/bin/setup.ts' --open-key-file");
 });
 
 test('next is the first failing error item, in order', async () => {

@@ -10,7 +10,7 @@ const TRANSCRIPTS = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fix
 const fakeImage = () => Buffer.from('fake-jpeg-bytes');
 
 function scenario(id: string, title: string) {
-  return { id, title, session: null, start: '/', steps: ['Open the page', 'Click "Go"'], values: {}, expected: `${id} expected result` };
+  return { id, title, start: '/', steps: ['Open the page', 'Click "Go"'], values: {}, expected: `${id} expected result` };
 }
 
 function evidence(runDir: string, id: string, text: string) {
@@ -30,10 +30,10 @@ function record(status: string, extra: Record<string, unknown> = {}) {
   return { status, currentStep: 2, jevActions: 3, claudeActions: 1, elapsedMs: 4200, handbacks: [], madeUp: {}, gaveUp: null, evidence: null, ...extra };
 }
 
-function syntheticRun(sessionId: string, browser?: 'chrome' | 'isolated'): string {
+function syntheticRun(sessionId: string): string {
   const runDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vqa-report-'));
   const suite = {
-    topic: 'Checkout flow', ...(browser ? { browser } : {}), baseUrl: 'https://a.example/', viewport: { width: 1280, height: 800 }, allowHosts: ['a.example'], judgeModel: 'sonnet',
+    topic: 'Checkout flow', baseUrl: 'https://a.example/', viewport: { width: 1280, height: 800 }, allowHosts: ['a.example'], judgeModel: 'sonnet',
     scenarios: [scenario('P1', 'Passing one'), scenario('F1', 'Failing <script>alert(1)</script>'), scenario('G1', 'Gave up')], sourcePath: '/s.yaml',
   };
   const run = {
@@ -125,11 +125,4 @@ test('failed requests appear under Page checks; older runs without them say "non
   const html = renderReport(buildReportModel(runDir, { configDir: TRANSCRIPTS }), fakeImage);
   assert.ok(html.includes('Failed requests: 403 POST a.example/api/chat — {&quot;errors&quot;:[{&quot;code&quot;:&quot;recaptcha_unsuccessful&quot;}]}'));
   assert.ok(html.includes('Failed requests: none'), 'F1 has evidence without the field');
-});
-
-test('chrome-mode runs say so in the header; isolated runs do not', () => {
-  const chrome = renderReport(buildReportModel(syntheticRun('none', 'chrome'), { configDir: TRANSCRIPTS }), fakeImage);
-  assert.ok(chrome.includes('Ran in your Chrome (shared sign-ins and state)'));
-  const isolated = renderReport(buildReportModel(syntheticRun('none', 'isolated'), { configDir: TRANSCRIPTS }), fakeImage);
-  assert.ok(!isolated.includes('Ran in your Chrome'));
 });

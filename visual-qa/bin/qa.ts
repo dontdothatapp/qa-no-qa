@@ -8,7 +8,6 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
-import { stateDir } from '../src/config.ts';
 import { createRunFolder, startDaemon } from '../src/daemon.ts';
 import { clearCurrentRun, DaemonUnreachable, isOurDaemon, readCurrentRun, sendCommand, writeCurrentRun } from '../src/daemon-client.ts';
 import { writeReport } from '../src/report.ts';
@@ -16,11 +15,10 @@ import { CHROME_OFF_MESSAGE, findChromeEndpoint } from '../src/chrome.ts';
 import { createScriptedClient, createTypeSafeClient, JevError, type JevAnswer, type JevClient } from '../src/jev-client.ts';
 import { loadSuite, SuiteError } from '../src/scenarios.ts';
 import { runDoctor } from '../src/doctor.ts';
-import { login } from '../src/login.ts';
 import { chromium } from 'playwright';
 import { TypeSafeClient, noul } from '@typesafe-ai/sdk';
 
-export const COMMANDS = ['start', 'daemon', 'run', 'resume', 'look', 'act', 'shot', 'step-done', 'giveup', 'evidence', 'report', 'stop', 'doctor', 'login'] as const;
+export const COMMANDS = ['start', 'daemon', 'run', 'resume', 'look', 'act', 'shot', 'step-done', 'giveup', 'evidence', 'report', 'stop', 'doctor'] as const;
 export type CommandName = (typeof COMMANDS)[number];
 
 const BIN = fs.realpathSync(fileURLToPath(import.meta.url));
@@ -75,19 +73,8 @@ async function start(positionals: string[], values: Record<string, unknown>): Pr
     if (e instanceof SuiteError) throw new Error(`invalid scenario file: ${e.problems.join('; ')}`);
     throw e;
   }
-  const chromeMode = suite.browser === 'chrome';
-  let note: string | undefined;
-  if (chromeMode) {
-    if (!findChromeEndpoint()) throw new Error(CHROME_OFF_MESSAGE);
-    if (suite.scenarios.some((s) => s.session)) note = 'session: is ignored in chrome mode — scenarios use your Chrome sign-ins';
-    process.stderr.write('Click "Allow" in Chrome to let the QA run connect.\n');
-  } else {
-    for (const s of suite.scenarios) {
-      if (s.session && !fs.existsSync(path.join(stateDir(), 'sessions', `${s.session}.json`))) {
-        throw new Error(`session "${s.session}" not found — run: node ${BIN} login ${s.session} <url>`);
-      }
-    }
-  }
+  if (!findChromeEndpoint()) throw new Error(CHROME_OFF_MESSAGE);
+  process.stderr.write('Click "Allow" in Chrome to let the QA run connect.\n');
   const runDir = createRunFolder(suite, typeof values.session === 'string' ? values.session : null, new Date());
   const log = fs.openSync(path.join(runDir, 'daemon.log'), 'a');
   const child = spawn(process.execPath, [BIN, 'daemon', runDir], { detached: true, stdio: ['ignore', log, log], env: process.env });
@@ -96,14 +83,14 @@ async function start(positionals: string[], values: Record<string, unknown>): Pr
   child.unref();
   let d;
   try {
-    const deadline = Number(process.env.VISUAL_QA_DAEMON_START_TIMEOUT_MS ?? (chromeMode ? 110_000 : 20_000));
+    const deadline = Number(process.env.VISUAL_QA_DAEMON_START_TIMEOUT_MS ?? 110_000);
     d = await waitFor(path.join(runDir, 'daemon.json'), state, deadline);
   } catch (e) {
     try { if (child.pid) process.kill(child.pid, 'SIGTERM'); } catch { /* already gone */ }
     throw e;
   }
   writeCurrentRun({ runDir, port: d.port, token: d.token, pid: d.pid });
-  return { runDir, browser: suite.browser, scenarios: suite.scenarios.map((s) => s.id), judgeModel: suite.judgeModel, ...(note ? { note } : {}) };
+  return { runDir, scenarios: suite.scenarios.map((s) => s.id), judgeModel: suite.judgeModel };
 }
 
 async function stop(): Promise<unknown> {
@@ -197,12 +184,6 @@ export async function main(argv: string[]): Promise<number> {
         });
         print(r);
         return r.ok ? 0 : 1;
-      }
-      case 'login': {
-        const [sessionName, url] = positionals;
-        if (!sessionName || !url) throw new UsageError('usage: qa login <name> <url>');
-        print(await login(sessionName, url));
-        return 0;
       }
       default:
         print(await sendCommand(name, { id: needId(positionals, `${name} <id>`) }));

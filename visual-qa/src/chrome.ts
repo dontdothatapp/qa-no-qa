@@ -6,7 +6,7 @@ import { chromium, type Browser } from 'playwright';
 type Env = Record<string, string | undefined>;
 
 export const CHROME_OFF_MESSAGE =
-  'remote debugging is off in Chrome — open chrome://inspect/#remote-debugging and switch it on (or set browser: isolated)';
+  'remote debugging is off in Chrome — open chrome://inspect/#remote-debugging and switch it on';
 
 /**
  * Where to reach the user's running Chrome. Chrome ≥ 144 writes DevToolsActivePort (port, path)

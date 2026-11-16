@@ -44,7 +44,7 @@ export type ScenarioState = {
   newTabOpened: boolean;
   openError: string | null;
   crashed: boolean;
-  /** false in chrome mode: the context is the user's own profile and must never be closed. */
+  /** false when the context is the user's own profile: it must never be closed. */
   ownsContext: boolean;
   /** Tabs this scenario opened (its page and popups from it); the only tabs `switch_tab` and `closeScenario` touch. */
   ownPages: Page[];
@@ -105,7 +105,6 @@ function watchPage(state: ScenarioState, page: Page): void {
   });
 }
 
-/** Fresh browser context per scenario (§6.1), loaded only from its saved session. */
 async function initScenario(
   context: BrowserContext,
   page: Page,
@@ -135,21 +134,20 @@ async function initScenario(
   return state;
 }
 
-/** Isolated mode: a fresh browser context per scenario (§6.1), loaded only from its saved session. */
-export async function openScenario(
+/** A signed-out test: its own fresh context (no cookies, no storage) in the user's Chrome, closed when the scenario ends. */
+export async function openLoggedOutScenario(
   browser: Browser,
   suite: Suite,
   s: Scenario,
-  sessionFile: string | null,
   madeUp: Record<string, string>,
   t: RunnerTimeouts = {},
   onCreated?: (state: ScenarioState) => void,
 ): Promise<ScenarioState> {
-  const context = await browser.newContext({ viewport: suite.viewport, ...(sessionFile ? { storageState: sessionFile } : {}) });
+  const context = await browser.newContext({ viewport: suite.viewport });
   return initScenario(context, await context.newPage(), true, suite, s, madeUp, t, onCreated);
 }
 
-/** Chrome mode (§12): a new tab in the user's own profile, emulated at the suite viewport. */
+/** A new tab in the user's own profile (their sign-ins), emulated at the suite viewport. */
 export async function openScenarioInContext(
   context: BrowserContext,
   suite: Suite,
@@ -163,7 +161,7 @@ export async function openScenarioInContext(
   return initScenario(context, page, false, suite, s, madeUp, t, onCreated);
 }
 
-/** Closes what the scenario opened: its context in isolated mode, only its own tabs in chrome mode. */
+/** Closes what the scenario opened: its own context if it made one, otherwise only its own tabs. */
 export async function closeScenario(state: ScenarioState): Promise<void> {
   if (state.ownsContext) {
     await state.context.close().catch(() => {});

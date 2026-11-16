@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { openScenario, runJev, type ScenarioState } from '../src/scenario-runner.ts';
+import { openLoggedOutScenario, runJev, type ScenarioState } from '../src/scenario-runner.ts';
 import { openEventLog } from '../src/events.ts';
 import { performAction } from '../src/actions.ts';
 import { createScriptedClient, JevError, type JevAnswer } from '../src/jev-client.ts';
@@ -15,16 +15,16 @@ const fx = useBrowserAndFixtures();
 const FAST = { navTimeoutMs: 3000, actionTimeoutMs: 3000, settleMs: 50 };
 
 function scenario(p: Partial<Scenario>): Scenario {
-  return { id: 'S1', title: 't', session: null, start: '/index.html', steps: ['step'], values: {}, expected: 'e', ...p };
+  return { id: 'S1', title: 't', start: '/index.html', steps: ['step'], values: {}, expected: 'e', group: null, source: null, reliesOn: [], loggedOut: true, ...p };
 }
 
 function suiteFor(s: Scenario, allowHosts?: string[]): Suite {
-  return { topic: 'T', browser: 'isolated', baseUrl: fx.baseUrl() + '/', viewport: { width: 1280, height: 800 }, allowHosts: allowHosts ?? [new URL(fx.baseUrl()).host], judgeModel: 'sonnet', scenarios: [s], sourcePath: '/x.yaml' };
+  return { topic: 'T', baseUrl: fx.baseUrl() + '/', viewport: { width: 1280, height: 800 }, allowHosts: allowHosts ?? [new URL(fx.baseUrl()).host], judgeModel: 'sonnet', notes: null, groups: [], scenarios: [s], sourcePath: '/x.yaml' };
 }
 
 async function start(s: Scenario, allowHosts?: string[]): Promise<{ state: ScenarioState; runDir: string }> {
   const runDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vqa-run-'));
-  const state = await openScenario(fx.browser(), suiteFor(s, allowHosts), s, null, {}, FAST);
+  const state = await openLoggedOutScenario(fx.browser(), suiteFor(s, allowHosts), s, {}, FAST);
   return { state, runDir };
 }
 
@@ -179,7 +179,7 @@ test('after a new_tab hand-back, resume does not loop on the same flag (M1)', as
 test('upload paths in a scenario are relative to the scenario file, so suites work on any machine', async () => {
   const s = scenario({ start: '/upload.html', steps: ['Upload the attachment'] });
   const suite = { ...suiteFor(s), sourcePath: path.join(import.meta.dirname, 'fixtures', 'suite.yaml') };
-  const state = await openScenario(fx.browser(), suite, s, null, {}, FAST);
+  const state = await openLoggedOutScenario(fx.browser(), suite, s, {}, FAST);
   const snap = await takeSnapshot(state.page, { frames: false, maxTextChars: 100 });
   const input = snap.controls.find((c) => c.name === 'Attachment');
   assert.ok(input, 'file input exists');

@@ -10,7 +10,9 @@ import { fileURLToPath } from 'node:url';
 import { startDaemon, createRunFolder } from '../src/daemon.ts';
 import { createScriptedClient } from '../src/jev-client.ts';
 import { loadSuite } from '../src/scenarios.ts';
+import { connectChrome } from '../src/chrome.ts';
 import { serveFixtures } from './fixtures/serve.ts';
+import { launchStandInChrome } from './helpers.ts';
 
 const exec = promisify(execFile);
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -18,8 +20,15 @@ const BIN = path.join(ROOT, 'bin', 'qa.ts');
 const TMP = path.join(ROOT, 'test', '.tmp');
 
 let server: Awaited<ReturnType<typeof serveFixtures>>;
-before(async () => { server = await serveFixtures(); fs.mkdirSync(TMP, { recursive: true }); });
-after(async () => { await server.close(); });
+let chrome: Awaited<ReturnType<typeof launchStandInChrome>>;
+let chromeEnv: Record<string, string | undefined>;
+before(async () => {
+  server = await serveFixtures();
+  chrome = await launchStandInChrome();
+  chromeEnv = { ...process.env, VISUAL_QA_CHROME_ENDPOINT: chrome.endpoint };
+  fs.mkdirSync(TMP, { recursive: true });
+});
+after(async () => { await chrome.close(); await server.close(); });
 
 function tmp(name: string): string {
   return fs.mkdtempSync(path.join(TMP, `${name}-`));
@@ -28,7 +37,6 @@ function tmp(name: string): string {
 function suiteFile(dir: string): string {
   const file = path.join(dir, 'suite.yaml');
   fs.writeFileSync(file, `topic: Daemon test
-browser: isolated
 base_url: ${server.url}/
 scenarios:
   - id: S1
@@ -61,7 +69,7 @@ async function inProcess(answers: Parameters<typeof createScriptedClient>[0], ex
   const dir = tmp('daemon');
   const env = { ...process.env, VISUAL_QA_OUTPUT_DIR: dir };
   const runDir = createRunFolder(loadSuite(suiteFile(dir)), 'session-x', new Date(), env);
-  const d = await startDaemon(runDir, { jev: createScriptedClient(answers), navTimeoutMs: 5000, actionTimeoutMs: 3000, settleMs: 50, ...extra });
+  const d = await startDaemon(runDir, { jev: createScriptedClient(answers), navTimeoutMs: 5000, actionTimeoutMs: 3000, settleMs: 50, env: chromeEnv, ...extra });
   return { d, runDir };
 }
 
@@ -190,11 +198,11 @@ test('giveup on a never-started scenario records it without evidence', async () 
 async function botChatDaemon() {
   const dir = tmp('daemon-bot');
   const file = path.join(dir, 'suite.yaml');
-  fs.writeFileSync(file, `topic: Bot wall\nbrowser: isolated\nbase_url: ${server.url}/\nscenarios:\n  - {id: B1, title: Chat, start: /bot-chat.html, steps: ['Click "Send"', 'Wait for the reply'], expected: A reply}\n`);
+  fs.writeFileSync(file, `topic: Bot wall\nbase_url: ${server.url}/\nscenarios:\n  - {id: B1, title: Chat, start: /bot-chat.html, steps: ['Click "Send"', 'Wait for the reply'], expected: A reply}\n`);
   const env = { ...process.env, VISUAL_QA_OUTPUT_DIR: dir };
   const runDir = createRunFolder(loadSuite(file), 'session-x', new Date(), env);
   // Jev hands back straight away, so Claude drives
-  const d = await startDaemon(runDir, { jev: createScriptedClient([{ operation: 'done', opConfidence: 0.3 }]), navTimeoutMs: 5000, actionTimeoutMs: 3000, settleMs: 50 });
+  const d = await startDaemon(runDir, { jev: createScriptedClient([{ operation: 'done', opConfidence: 0.3 }]), navTimeoutMs: 5000, actionTimeoutMs: 3000, settleMs: 50, env: chromeEnv });
   const r = await cmd(d, 'run', { id: 'B1' });
   assert.equal(r.body.result.status, 'handback');
   const look = (await cmd(d, 'look', { id: 'B1' })).body.result.text as string;
@@ -273,7 +281,7 @@ test('wrong token → 401', async () => {
 });
 
 function cliEnv(stateDir: string, outDir: string, fakeJev: string) {
-  return { ...process.env, VISUAL_QA_STATE_DIR: stateDir, VISUAL_QA_OUTPUT_DIR: outDir, VISUAL_QA_FAKE_JEV: fakeJev };
+  return { ...process.env, VISUAL_QA_STATE_DIR: stateDir, VISUAL_QA_OUTPUT_DIR: outDir, VISUAL_QA_FAKE_JEV: fakeJev, VISUAL_QA_CHROME_ENDPOINT: chrome.endpoint };
 }
 
 async function qa(args: string[], env: NodeJS.ProcessEnv) {
@@ -368,12 +376,23 @@ test('qa report works without a live daemon (I9)', async () => {
   assert.equal(again.code, 0, again.out);
 });
 
-test('qa start reports a missing saved session with the login command', async () => {
-  const dir = tmp('session');
+test('run on a logged_out scenario opens and closes its own context', async () => {
+  const dir = tmp('logged-out');
   const file = path.join(dir, 'suite.yaml');
-  fs.writeFileSync(file, `topic: T\nbrowser: isolated\nbase_url: ${server.url}/\nsession: staging-user\nscenarios:\n  - {id: A, title: a, start: /, steps: [x], expected: y}\n`);
-  const env = cliEnv(path.join(dir, 'state'), path.join(dir, 'out'), path.join(dir, 'none.json'));
-  const r = await qa(['start', file, '--session', 'x'], env);
-  assert.notEqual(r.code, 0);
-  assert.match(JSON.parse(r.out).error, /session "staging-user" not found — run: node .*bin\/qa\.ts login staging-user <url>/);
+  fs.writeFileSync(file, `topic: Logged out\nbase_url: ${server.url}/\nscenarios:\n  - {id: L1, title: Thanks, start: /thanks.html, steps: [Look], expected: Thanks, logged_out: true}\n`);
+  const user = await connectChrome(chrome.endpoint, 10_000);
+  const pagesBefore = user.contexts()[0].pages().length;
+  const contextsBefore = user.contexts().length;
+  const env = { ...process.env, VISUAL_QA_OUTPUT_DIR: dir, VISUAL_QA_CHROME_ENDPOINT: chrome.endpoint };
+  const runDir = createRunFolder(loadSuite(file), 's', new Date(), env);
+  const d = await startDaemon(runDir, { jev: createScriptedClient([{ operation: 'done' }]), navTimeoutMs: 5000, actionTimeoutMs: 3000, settleMs: 50, env });
+  try {
+    const r = await cmd(d, 'run', { id: 'L1' });
+    assert.equal(r.body.result.status, 'completed', JSON.stringify(r.body));
+    assert.equal(user.contexts()[0].pages().length, pagesBefore, 'no tab left in the default context');
+    assert.equal(user.contexts().length, contextsBefore, 'its own context is closed');
+  } finally {
+    await d.close();
+    await user.close();
+  }
 });

@@ -3,14 +3,14 @@ import http from 'node:http';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import type { Socket } from 'node:net';
-import { chromium, type Browser } from 'playwright';
-import { DEFAULTS, runFolderName, stateDir } from './config.ts';
+import type { Browser } from 'playwright';
+import { DEFAULTS, runFolderName } from './config.ts';
 import { ACTION_OPS, performAction, type ActionOp } from './actions.ts';
 import { captureEvidence, type Evidence } from './evidence.ts';
 import { openEventLog, type EventLog } from './events.ts';
 import { createTypeSafeClient, type JevClient } from './jev-client.ts';
 import {
-  advanceStep, blockedGiveUp, closeScenario, completeScenario, finishGaveUp, isAllowedUrl, openScenario, openScenarioInContext,
+  advanceStep, blockedGiveUp, closeScenario, completeScenario, finishGaveUp, isAllowedUrl, openLoggedOutScenario, openScenarioInContext,
   resultOf, runJev, settleResponses, stopIfBlocked, type GaveUp, type RunnerTimeouts, type ScenarioState,
 } from './scenario-runner.ts';
 import { botBlockReason, describeFailed } from './network.ts';
@@ -79,25 +79,20 @@ export async function startDaemon(runDir: string, opts: DaemonOptions = {}): Pro
   const jev = opts.jev ?? createTypeSafeClient();
   const budget = opts.takeoverBudget ?? DEFAULTS.takeoverBudget;
   const events: EventLog = openEventLog(path.join(runDir, 'events.jsonl'));
-  const chromeMode = run.suite.browser === 'chrome';
+  // the user's own Chrome: they click Allow once; we only ever touch tabs (and contexts) we open
+  const env = opts.env ?? process.env;
+  const endpoint = findChromeEndpoint(env);
+  if (!endpoint) throw new Error(CHROME_OFF_MESSAGE);
+  const connectTimeout = Number(env.VISUAL_QA_CHROME_CONNECT_TIMEOUT_MS ?? 100_000);
   let browser: Browser;
-  if (chromeMode) {
-    // the user's own Chrome (§12): they click Allow once; we only ever touch tabs we open
-    const env = opts.env ?? process.env;
-    const endpoint = findChromeEndpoint(env);
-    if (!endpoint) throw new Error(CHROME_OFF_MESSAGE);
-    const connectTimeout = Number(env.VISUAL_QA_CHROME_CONNECT_TIMEOUT_MS ?? 100_000);
-    try {
-      browser = await connectChrome(endpoint, connectTimeout);
-    } catch (e) {
-      throw new Error(explainConnectError(e, connectTimeout));
-    }
-  } else {
-    browser = await chromium.launch();
+  try {
+    browser = await connectChrome(endpoint, connectTimeout);
+  } catch (e) {
+    throw new Error(explainConnectError(e, connectTimeout));
   }
   const needBrowser = () => {
     if (!browser.isConnected()) {
-      throw new CommandError(`the connection to the browser was lost${chromeMode ? ' (was Chrome closed?)' : ''} — run report to keep what was captured`);
+      throw new CommandError('the connection to the browser was lost (was Chrome closed?) — run report to keep what was captured');
     }
   };
   const states = new Map<string, ScenarioState>();
@@ -131,12 +126,6 @@ export async function startDaemon(runDir: string, opts: DaemonOptions = {}): Pro
     if (state.status === 'completed' || state.status === 'gave_up') await closeScenario(state);
   };
 
-  const sessionFile = (name: string | null) => {
-    if (!name) return null;
-    const file = path.join(stateDir(opts.env ?? process.env), 'sessions', `${name}.json`);
-    return fs.existsSync(file) ? file : null;
-  };
-
   const commands: Record<string, (a: Record<string, unknown>) => Promise<unknown>> = {
     async run(a) {
       const s = scenarioOf(a.id);
@@ -147,9 +136,9 @@ export async function startDaemon(runDir: string, opts: DaemonOptions = {}): Pro
       }
       needBrowser();
       events.append({ type: 'scenario_start', id: s.id });
-      const state = chromeMode
-        ? await openScenarioInContext(browser.contexts()[0], run.suite, s, run.madeUpCache, t, (st) => states.set(s.id, st))
-        : await openScenario(browser, run.suite, s, sessionFile(s.session), run.madeUpCache, t, (st) => states.set(s.id, st));
+      const state = s.loggedOut
+        ? await openLoggedOutScenario(browser, run.suite, s, run.madeUpCache, t, (st) => states.set(s.id, st))
+        : await openScenarioInContext(browser.contexts()[0], run.suite, s, run.madeUpCache, t, (st) => states.set(s.id, st));
       states.set(s.id, state);
       const result = await runJev(state, { jev, events, runDir, ...t });
       persist(state);
@@ -201,7 +190,7 @@ export async function startDaemon(runDir: string, opts: DaemonOptions = {}): Pro
       const value = a.value === undefined || a.value === null ? undefined : String(a.value);
       const control = ref === undefined ? null : snap.controls.find((c) => c.ref === ref) ?? null;
       if (op === 'type' && control?.isPassword) {
-        throw new CommandError('refusing to type into a password field — passwords are never filled; sign in to the site in your Chrome (or use qa login in isolated mode)');
+        throw new CommandError('refusing to type into a password field — passwords are never filled; sign in to the site in your Chrome');
       }
       if (op === 'goto' && value !== undefined && isAllowedUrl(value, run.suite.allowHosts) !== true) {
         throw new CommandError(`refusing to open ${value}: host is not in allow_hosts (${run.suite.allowHosts.join(', ')})`);
@@ -358,7 +347,7 @@ export async function startDaemon(runDir: string, opts: DaemonOptions = {}): Pro
     if (closed) return;
     closed = true;
     if (idleTimer) clearTimeout(idleTimer);
-    // chrome mode: close only our own tabs, then disconnect (never closes the user's Chrome)
+    // close only our own tabs and contexts, then disconnect (never closes the user's Chrome)
     for (const st of states.values()) await closeScenario(st);
     await browser.close().catch(() => {});
     for (const s of sockets) s.destroy();

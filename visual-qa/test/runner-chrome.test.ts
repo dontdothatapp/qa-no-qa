@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { Browser, BrowserContext, Page } from 'playwright';
 import { connectChrome } from '../src/chrome.ts';
-import { openScenarioInContext, closeScenario, runJev } from '../src/scenario-runner.ts';
+import { openScenarioInContext, openLoggedOutScenario, closeScenario, runJev } from '../src/scenario-runner.ts';
 import { performAction } from '../src/actions.ts';
 import { openEventLog } from '../src/events.ts';
 import { createScriptedClient, type JevClient } from '../src/jev-client.ts';
@@ -34,10 +34,10 @@ after(async () => {
   await server.close();
 });
 
-const scenario = (p: Partial<Scenario>): Scenario => ({ id: 'C1', title: 't', session: null, start: '/thanks.html', steps: ['step'], values: {}, expected: 'e', ...p });
+const scenario = (p: Partial<Scenario>): Scenario => ({ id: 'C1', title: 't', start: '/thanks.html', steps: ['step'], values: {}, expected: 'e', group: null, source: null, reliesOn: [], loggedOut: false, ...p });
 const suite = (s: Scenario): Suite => ({
-  topic: 'T', browser: 'chrome', baseUrl: server.url + '/', viewport: { width: 1280, height: 800 },
-  allowHosts: [new URL(server.url).host], judgeModel: 'sonnet', scenarios: [s], sourcePath: '/x.yaml',
+  topic: 'T', baseUrl: server.url + '/', viewport: { width: 1280, height: 800 },
+  allowHosts: [new URL(server.url).host], judgeModel: 'sonnet', notes: null, groups: [], scenarios: [s], sourcePath: '/x.yaml',
 });
 const deps = (jev: JevClient) => {
   const runDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vqa-chrome-run-'));
@@ -90,4 +90,29 @@ test('a popup from the scenario tab is a new_tab hand-back, and switch_tab only 
   await closeScenario(state);
   assert.equal(ctx.pages().length, before - 2);
   assert.equal(userTab.isClosed(), false);
+});
+
+test('a logged-out test gets its own context with no cookies, and closing it leaves the user\'s tabs alone', async () => {
+  await ctx.addCookies([{ name: 'sid', value: 'user', url: server.url }]);
+  const s = scenario({ loggedOut: true });
+  const state = await openLoggedOutScenario(browser, suite(s), s, {}, FAST);
+  try {
+    assert.equal((await state.context.cookies()).length, 0);
+    assert.notEqual(state.context, ctx);
+    assert.equal(state.ownsContext, true);
+  } finally {
+    await closeScenario(state);
+    await ctx.clearCookies();
+  }
+  assert.equal(userTab.isClosed(), false);
+  assert.ok(ctx.pages().includes(userTab));
+});
+
+test('closing the logged-out window mid-test hands back with error', async () => {
+  const s = scenario({ loggedOut: true });
+  const state = await openLoggedOutScenario(browser, suite(s), s, {}, FAST);
+  await state.context.close();
+  const r = await runJev(state, deps(createScriptedClient([{ operation: 'done' }])));
+  assert.equal(r.status, 'handback');
+  assert.equal(r.reason, 'error');
 });

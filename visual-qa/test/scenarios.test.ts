@@ -150,8 +150,8 @@ base_url: https://a.example
 scenarios:
   - {id: A, title: a, start: /, steps: [x], expected: y, values: {Password: hunter2, PIN code: "1234", Name: ok}}
 `);
-  assert.ok(problems.includes('A: passwords are not supported in values ("Password") — use a signed-in browser session'), problems.join('\n'));
-  assert.ok(problems.includes('A: passwords are not supported in values ("PIN code") — use a signed-in browser session'), problems.join('\n'));
+  assert.ok(problems.includes('A: passwords are not supported in values ("Password") — sign in to the site in your Chrome instead'), problems.join('\n'));
+  assert.ok(problems.includes('A: passwords are not supported in values ("PIN code") — sign in to the site in your Chrome instead'), problems.join('\n'));
   assert.equal(problems.length, 2);
 });
 
@@ -259,4 +259,18 @@ scenarios:
     'groups[1]: duplicate id "g1"',
     'groups[0]: missing "needs"',
   ]) assert.ok(problems.includes(p), `${p}\n${problems.join('\n')}`);
+});
+
+test('after_step is not range-checked when steps are invalid', () => {
+  const problems = problemsOf(`topic: T
+base_url: https://a.example
+scenarios:
+  - id: S1
+    title: a
+    start: /
+    relies_on: [{what: x, after_step: 1}]
+    expected: z
+`);
+  assert.ok(problems.includes('S1: steps must be a non-empty list'), problems.join('\n'));
+  assert.ok(!problems.some((p) => p.includes('after_step')), problems.join('\n'));
 });

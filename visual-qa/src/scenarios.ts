@@ -118,9 +118,8 @@ export function loadSuite(file: string): Suite {
       if (!expected) problems.push(`${id}: missing "expected"`);
 
       const steps = Array.isArray(raw.steps) ? raw.steps.map(str) : null;
-      if (!steps || steps.length === 0 || steps.some((s) => s === null)) {
-        problems.push(`${id}: steps must be a non-empty list`);
-      }
+      const stepsValid = !!steps && steps.length > 0 && !steps.some((s) => s === null);
+      if (!stepsValid) problems.push(`${id}: steps must be a non-empty list`);
 
       const values: Record<string, string> = {};
       if (raw.values !== undefined) {
@@ -128,7 +127,7 @@ export function loadSuite(file: string): Suite {
           for (const [k, v] of Object.entries(raw.values)) {
             const s = str(v);
             if (/\b(pass(word|code|phrase)?|pwd|pw|pin)\b/i.test(k.replace(/[_-]+/g, ' '))) {
-              problems.push(`${id}: passwords are not supported in values ("${k}") — use a signed-in browser session`);
+              problems.push(`${id}: passwords are not supported in values ("${k}") — sign in to the site in your Chrome instead`);
             } else if (s === null) problems.push(`${id}: value for "${k}" must be text or a number`);
             else values[k] = s;
           }
@@ -163,7 +162,7 @@ export function loadSuite(file: string): Suite {
             const what = str(r.what);
             if (!what) problems.push(`${id}: relies_on[${j}]: missing "what"`);
             let afterStep: number | null = null;
-            if (r.after_step !== undefined && r.after_step !== null) {
+            if (r.after_step !== undefined && r.after_step !== null && stepsValid) {
               const n = r.after_step;
               const max = steps?.length ?? 0;
               if (typeof n === 'number' && Number.isInteger(n) && n >= 1 && n <= max) afterStep = n;

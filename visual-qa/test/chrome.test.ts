@@ -21,7 +21,7 @@ test('DevToolsActivePort becomes a ws endpoint', () => {
 test('no DevToolsActivePort → null, and the off message says how to fix it', () => {
   assert.equal(findChromeEndpoint({ VISUAL_QA_CHROME_DATA_DIR: tmp() }), null);
   assert.match(CHROME_OFF_MESSAGE, /chrome:\/\/inspect\/#remote-debugging/);
-  assert.match(CHROME_OFF_MESSAGE, /browser: isolated/);
+  assert.doesNotMatch(CHROME_OFF_MESSAGE, /isolated/);
 });
 
 test('connectChrome attaches to a running browser', async () => {

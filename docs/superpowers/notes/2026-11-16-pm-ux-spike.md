@@ -23,3 +23,30 @@
 - Exit code 0. The user confirmed Chrome opened the remote-debugging page with the on/off switch.
 
 **Decision:** Task 8's `--open-chrome` runs exactly this command and returns `{ opened: true }`. The `{ opened: false, address }` form is kept only for a non-zero exit, e.g. Chrome not installed.
+
+## Task 10 — real plugin install (2026-11-16)
+
+### (c) Install from GitHub, into a throwaway `CLAUDE_CONFIG_DIR` — works
+
+Ran from the branch, pushed with the user's OK:
+
+```
+claude plugin marketplace add "https://github.com/dontdothatapp/qa-no-qa.git#pm-friendly-ux"
+claude plugin install visual-qa@qa-no-qa
+```
+
+- The marketplace clone, validation and plugin install all succeeded. The `#<ref>` suffix selects the branch.
+- Claude Code ran the npm install itself into `plugins/cache/qa-no-qa/visual-qa/<sha>/node_modules`, about a second after copying the files. The result is 53 MB, including dev dependencies, which is well inside the 60 s limit.
+- From the cache, `bin/setup.ts --check` reports `node` and `packages` ok and stops at `typesafe_key` (empty HOME). `bin/qa.ts remaining` imports playwright and the SDK fine.
+- A *local-path* marketplace (`claude plugin marketplace add "$PWD"`) copies the working tree as-is, including the gitignored `node_modules` and `test/.tmp`. It can't show whether the auto-install works, so only the GitHub install counts as evidence.
+
+**Decision:** no change to `package.json`. `playwright-core` and the SessionStart-hook fallback aren't needed.
+
+The user's old `~/.claude/skills/visual-qa` symlink was removed with their OK. The skill moved to `skills/test/`.
+
+### (d) and (e)
+
+- **(d)** Whether `/reload-plugins` is needed, in the terminal and in the desktop app.
+- **(e)** Whether runner commands prompt for approval after a pause or inside the takeover and judge subagents.
+
+Both are checked in the live acceptance session with the user (ruling R13 in the SDD ledger) and recorded below.
